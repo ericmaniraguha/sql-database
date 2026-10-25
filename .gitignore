@@ -10,6 +10,11 @@
 .env.local
 *.secret.sql
 
+# Python (module 16)
+.venv/
+__pycache__/
+sql/16-database-connections/python/output/
+
 # Editor & OS files
 .DS_Store
 Thumbs.db

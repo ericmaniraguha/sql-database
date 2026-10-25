@@ -1,77 +1,132 @@
 /*
 ================================================================================
-Topic: Filtering Groups with the HAVING Clause
-Objective: Distinguish between WHERE and HAVING, filter grouped results based 
-           on aggregate metrics, and understand query processing phases.
-Database: PostgreSQL / MySQL / Oracle
+Topic: Filtering Groups with HAVING
+Objective: Tell WHERE and HAVING apart, filter groups on aggregate values,
+           and combine both clauses in one query.
+Database: PostgreSQL (pgAdmin)
+          MySQL / Oracle: identical syntax (MySQL also allows SELECT aliases
+          in HAVING; PostgreSQL and Oracle do not)
 ================================================================================
 */
 
 -- =============================================================================
--- 1. Concept Overview: WHERE vs HAVING
+-- 1. Concept Overview: WHERE vs. HAVING
 -- =============================================================================
--- | Clause  | Execution Phase          | Operates On  | Can Use Aggregate Functions? |
--- |---------|--------------------------|--------------|------------------------------|
--- | WHERE   | BEFORE grouping happens  | Individual rows | NO                          |
--- | HAVING  | AFTER grouping happens   | Aggregated groups | YES                       |
+-- | Clause | Runs                  | Filters        | Aggregates allowed? |
+-- |--------|-----------------------|----------------|---------------------|
+-- | WHERE  | BEFORE GROUP BY       | single rows    | NO                  |
+-- | HAVING | AFTER  GROUP BY       | whole groups   | YES                 |
 --
--- Logical Query Execution Order:
--- 1. FROM & JOIN
--- 2. WHERE (filters raw rows)
--- 3. GROUP BY (collapses rows into groups)
--- 4. HAVING (filters summarized groups)
--- 5. SELECT (projections & computed expressions)
--- 6. DISTINCT
--- 7. ORDER BY (sorts final output)
--- 8. LIMIT / OFFSET / FETCH FIRST
+-- Logical order in which the database processes a query:
+--   1. FROM / JOIN    which tables
+--   2. WHERE          keep only some rows
+--   3. GROUP BY       put the remaining rows into groups
+--   4. HAVING         keep only some groups
+--   5. SELECT         calculate the output columns
+--   6. ORDER BY       sort
+--   7. LIMIT / FETCH  cut the result
+
 
 -- =============================================================================
--- 2. Basic HAVING Filter
+-- 2. HAVING on a Count
 -- =============================================================================
-
--- Find departments with more than 1 instructor
-SELECT 
+-- Departments with more than one lecturer
+SELECT
     department_id,
-    COUNT(*) AS instructor_count,
-    ROUND(AVG(salary), 2) AS avg_salary
-FROM instructors
+    COUNT(*) AS lecturers
+FROM lecturers
 GROUP BY department_id
-HAVING COUNT(*) > 1;
+HAVING COUNT(*) > 1
+ORDER BY department_id;                           -- departments 1, 2, 3 (not 4)
 
--- Find departments where average instructor salary exceeds $60,000
-SELECT 
+-- Invoices paid in more than one instalment
+SELECT
+    invoice_id,
+    COUNT(*)    AS instalments,
+    SUM(amount) AS total_paid
+FROM payments
+GROUP BY invoice_id
+HAVING COUNT(*) > 1
+ORDER BY invoice_id;                              -- invoices 1, 7, 15
+
+
+-- =============================================================================
+-- 3. HAVING on an Average (and the > vs >= Trap)
+-- =============================================================================
+-- Departments whose average lecturer salary is ABOVE 1,500,000 RWF
+SELECT
     department_id,
-    ROUND(AVG(salary), 2) AS avg_salary
-FROM instructors
+    ROUND(AVG(monthly_salary), 2) AS average_salary
+FROM lecturers
 GROUP BY department_id
-HAVING AVG(salary) > 60000.00;
+HAVING AVG(monthly_salary) > 1500000;             -- only department 2
 
--- =============================================================================
--- 3. Combining WHERE and HAVING in the Same Query
--- =============================================================================
-
--- Consider only 'Active' students (WHERE), group by department, 
--- and return only departments with at least 2 active students and an average GPA >= 3.50 (HAVING)
-SELECT 
+-- Department 1 averages EXACTLY 1,500,000, so it only appears with >=
+SELECT
     department_id,
-    COUNT(*) AS active_student_count,
-    ROUND(AVG(gpa), 2) AS dept_avg_gpa
-FROM students
-WHERE status = 'Active'               -- Filter individual student rows first
-GROUP BY department_id               -- Group remaining rows by department
-HAVING COUNT(*) >= 2                 -- Filter groups: must have >= 2 active students
-   AND AVG(gpa) >= 3.50              -- Filter groups: group avg GPA must be >= 3.50
-ORDER BY dept_avg_gpa DESC;
+    ROUND(AVG(monthly_salary), 2) AS average_salary
+FROM lecturers
+GROUP BY department_id
+HAVING AVG(monthly_salary) >= 1500000
+ORDER BY department_id;                           -- departments 1 and 2
+
 
 -- =============================================================================
--- 4. Common Error: Using WHERE with Aggregate
+-- 4. WHERE and HAVING Together
 -- =============================================================================
--- INCORRECT:
--- SELECT department_id FROM students WHERE AVG(gpa) > 3.00 GROUP BY department_id;
--- ERROR: Aggregate function not allowed in WHERE clause! Use HAVING instead.
+-- Current-term courses (WHERE: a row filter) with at least 3 graded students
+-- (HAVING: a group filter)
+SELECT
+    course_code,
+    COUNT(*)                     AS students,
+    ROUND(AVG(final_percent), 1) AS class_average
+FROM final_grades
+WHERE academic_year = '2026/2027'                 -- 1) keep current-term rows
+GROUP BY course_code                              -- 2) one group per course
+HAVING COUNT(*) >= 3                              -- 3) keep the big groups
+ORDER BY class_average DESC;                      -- MATH110 (3 students), CS101 (5)
+
+-- Students who owe money for MORE THAN ONE term
+SELECT
+    student_id,
+    student_name,
+    COUNT(*)         AS terms_with_debt,
+    SUM(balance_due) AS total_owed
+FROM student_balances
+WHERE balance_due > 0                             -- only invoices with a balance
+GROUP BY student_id, student_name
+HAVING COUNT(*) >= 2                              -- in 2 or more terms
+ORDER BY total_owed DESC;                         -- Fabrice, Kevin
+
 
 -- =============================================================================
--- 5. Practice Questions
+-- 5. Common Mistakes
 -- =============================================================================
--- Exercise 1: Find all courses that have more than 2 student enrollments.
--- Exercise 2: Find departments where the maximum student GPA is greater than 3.80.
+
+-- Mistake 1: an aggregate in WHERE. WHERE runs before groups exist.
+-- SELECT department_id FROM lecturers WHERE AVG(monthly_salary) > 1500000 GROUP BY department_id;
+-- Expected: ERROR: aggregate functions are not allowed in WHERE
+
+-- Mistake 2: a SELECT alias in HAVING. HAVING runs before SELECT names the column.
+-- SELECT department_id, COUNT(*) AS lecturer_count FROM lecturers
+-- GROUP BY department_id HAVING lecturer_count > 1;
+-- Expected: ERROR: column "lecturer_count" does not exist   (MySQL accepts it)
+-- Fix: repeat the expression: HAVING COUNT(*) > 1
+
+-- Mistake 3 (works, but wasteful): a plain row condition in HAVING.
+-- This filters AFTER grouping all rows:
+SELECT department_id, COUNT(*) AS lecturers
+FROM lecturers
+GROUP BY department_id
+HAVING department_id <> 4;
+-- Better: filter rows first with WHERE department_id <> 4, then group.
+
+
+-- =============================================================================
+-- 6. Practice Exercises
+-- =============================================================================
+-- Exercise 1: Find course offerings (offering_id) with more than 2 enrollments.
+-- Exercise 2: Find programmes (program_id) with at least 3 ACTIVE students.
+-- Exercise 3: Find courses in final_grades whose highest final_percent is
+--             above 85.
+-- Exercise 4: Find payment methods that brought in more than 1,000,000 RWF in total.

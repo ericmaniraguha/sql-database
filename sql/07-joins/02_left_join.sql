@@ -3,7 +3,8 @@
 Topic: Preserving Unmatched Rows with LEFT JOIN
 Objective: Retrieve all records from the left table regardless of matches, and 
            identify missing or orphaned relationships using anti-join patterns.
-Database: PostgreSQL / MySQL / Oracle
+Database: PostgreSQL (pgAdmin)
+          MySQL: use CONCAT() instead of || ; otherwise identical
 ================================================================================
 */
 
@@ -18,81 +19,98 @@ Database: PostgreSQL / MySQL / Oracle
 -- Adding "WHERE right_table.primary_key IS NULL" filters for records in the left
 -- table that have ZERO matches in the right table!
 
+
 -- =============================================================================
--- 2. Basic LEFT JOIN: All Departments and Their Instructors
+-- 2. Academic Structure: Faculties, Departments, and Department Heads
 -- =============================================================================
+-- Preserves all departments even if a department currently has no appointed head:
 
 SELECT 
-    d.department_id,
+    f.faculty_name,
     d.department_name,
-    i.instructor_id,
-    CONCAT(i.first_name, ' ', i.last_name) AS instructor_name,
-    i.academic_rank
+    COALESCE(l.first_name || ' ' || l.last_name, '(vacant)') AS head_of_department
 FROM departments d
-LEFT JOIN instructors i 
-    ON d.department_id = i.department_id
-ORDER BY d.department_id;
+INNER JOIN faculties f       ON f.faculty_id    = d.faculty_id
+LEFT JOIN department_heads h ON h.department_id = d.department_id
+LEFT JOIN lecturers l        ON l.lecturer_id   = h.lecturer_id
+ORDER BY f.faculty_name, d.department_name;
+
 
 -- =============================================================================
--- 3. All Students and Their Enrollments (Including Unenrolled Students)
+-- 3. Lecturer Teaching Load (Keeping Lecturers with No Classes)
 -- =============================================================================
+-- Summarizes teaching assignments for term 1; lecturers without classes still appear:
 
 SELECT 
-    s.student_id,
-    CONCAT(s.first_name, ' ', s.last_name) AS student_name,
-    s.status,
-    e.course_id,
-    e.letter_grade
-FROM students s
-LEFT JOIN enrollments e 
-    ON s.student_id = e.student_id
-ORDER BY s.student_id;
+    l.first_name || ' ' || l.last_name AS lecturer,
+    l.academic_rank,
+    COUNT(DISTINCT o.offering_id)      AS courses_taught,
+    COUNT(e.enrollment_id)             AS total_students
+FROM lecturers l
+LEFT JOIN course_offerings o ON o.lecturer_id = l.lecturer_id AND o.term_id = 1
+LEFT JOIN enrollments e      ON e.offering_id = o.offering_id
+GROUP BY l.lecturer_id, l.first_name, l.last_name, l.academic_rank
+ORDER BY total_students DESC;
+
 
 -- =============================================================================
--- 4. The Anti-Join Pattern: Finding Records with No Matches
+-- 4. Anti-Join Pattern 1: Courses in Catalog NOT Offered This Term
 -- =============================================================================
+-- Identifies inactive or dormant courses:
 
--- Find all students who have NEVER enrolled in any course
-SELECT 
-    s.student_id,
-    s.first_name,
-    s.last_name,
-    s.email,
-    s.status
-FROM students s
-LEFT JOIN enrollments e 
-    ON s.student_id = e.student_id
-WHERE e.enrollment_id IS NULL; -- Anti-join condition!
-
--- Find courses that have zero student enrollments
 SELECT 
     c.course_id,
     c.course_code,
-    c.course_name
+    c.course_title,
+    c.credits
 FROM courses c
-LEFT JOIN enrollments e 
-    ON c.course_id = e.course_id
-WHERE e.enrollment_id IS NULL;
+LEFT JOIN course_offerings o 
+    ON c.course_id = o.course_id AND o.term_id = 1
+WHERE o.offering_id IS NULL;
+
 
 -- =============================================================================
--- 5. LEFT JOIN with Aggregation: Counting with Zero Representation
+-- 5. Anti-Join Pattern 2: Students with Unpaid Invoices (Zero Payments)
 -- =============================================================================
+-- Finds students who have been issued an invoice but have made no payments:
 
--- Notice: COUNT(e.enrollment_id) returns 0 for students with no enrollments, 
--- whereas COUNT(*) would incorrectly return 1 because the student row exists!
 SELECT 
     s.student_id,
-    CONCAT(s.first_name, ' ', s.last_name) AS student_name,
-    COUNT(e.enrollment_id) AS total_courses_enrolled
-FROM students s
-LEFT JOIN enrollments e 
-    ON s.student_id = e.student_id
-GROUP BY s.student_id, s.first_name, s.last_name
-ORDER BY total_courses_enrolled DESC;
+    s.registration_no,
+    s.first_name || ' ' || s.last_name AS student_name,
+    i.invoice_id,
+    i.due_date
+FROM invoices i
+INNER JOIN students s ON s.student_id = i.student_id
+LEFT JOIN payments p  ON p.invoice_id = i.invoice_id
+WHERE p.payment_id IS NULL;
+
 
 -- =============================================================================
--- 6. Practice Questions
+-- 6. The ON vs. WHERE Trap
 -- =============================================================================
--- Exercise 1: Find all instructors who are not currently assigned to teach any course.
--- Exercise 2: List every department along with the count of instructors hired, 
---             ensuring departments with 0 instructors show 0 (not NULL).
+-- A condition on the RIGHT table belongs in ON. In WHERE it removes the
+-- NULL rows that LEFT JOIN just kept, so the query behaves like an INNER JOIN.
+
+-- WRONG: lecturers with no current-term class disappear (5 rows, not 8)
+SELECT l.first_name, l.last_name, o.offering_id
+FROM lecturers l
+LEFT JOIN course_offerings o ON o.lecturer_id = l.lecturer_id
+WHERE o.term_id = 1
+ORDER BY l.last_name;
+
+-- RIGHT: filter the offerings inside ON; every lecturer stays (8 rows)
+SELECT l.first_name, l.last_name, o.offering_id
+FROM lecturers l
+LEFT JOIN course_offerings o ON o.lecturer_id = l.lecturer_id
+                            AND o.term_id = 1
+ORDER BY l.last_name;
+
+
+-- =============================================================================
+-- 7. Practice Exercises
+-- =============================================================================
+-- Exercise 1: Write an anti-join to find all scholarships that have NOT been awarded
+--             to any student for term 1.
+-- Exercise 2: Write a LEFT JOIN between programs and students to list all degree 
+--             programs and the count of registered students in each.

@@ -1,74 +1,93 @@
 /*
 ================================================================================
 Topic: Basic Aggregate Functions
-Objective: Summarize datasets and calculate summary metrics using COUNT, SUM, 
-           AVG, MIN, and MAX, understanding how NULLs are treated.
-Database: PostgreSQL / MySQL / Oracle
+Objective: Summarize datasets and calculate institutional metrics using COUNT, 
+           SUM, AVG, MIN, and MAX on the ULK University database.
+Database: PostgreSQL (pgAdmin)
+          MySQL / Oracle: identical syntax
 ================================================================================
 */
 
 -- =============================================================================
 -- 1. Concept Overview
 -- =============================================================================
--- Aggregate functions operate on a set of rows and return a single summary value.
--- Key Rule: Aggregate functions (except COUNT(*)) automatically IGNORE NULL values!
--- - COUNT(*): Counts total number of rows (including NULLs).
--- - COUNT(col): Counts non-NULL entries in that column.
--- - COUNT(DISTINCT col): Counts unique non-NULL entries.
--- - SUM(col): Total sum of values.
--- - AVG(col): Arithmetic mean (SUM / non-null COUNT).
--- - MIN(col) / MAX(col): Lowest and highest values.
+-- Aggregate functions summarize a set of rows into a single numeric metric.
+-- Key Rules:
+-- 1. Aggregate functions (except COUNT(*)) automatically ignore NULL values!
+-- 2. COUNT(*): Counts the total number of records (including rows with NULLs).
+-- 3. COUNT(column): Counts non-NULL entries in that column.
+-- 4. COUNT(DISTINCT column): Counts unique non-NULL values.
+-- 5. SUM, AVG, MIN, MAX: Compute mathematical totals, averages, and extremes.
+
 
 -- =============================================================================
--- 2. Counting Rows and Non-NULLs
+-- 2. Counting Records and Non-NULLs
 -- =============================================================================
 
-SELECT 
-    COUNT(*)                     AS total_students,
-    COUNT(department_id)         AS students_with_department,
-    COUNT(DISTINCT department_id) AS distinct_departments_represented
+-- Analyze student body enrollment and program distribution:
+SELECT
+    COUNT(*)                     AS total_students,                -- 15: every row
+    COUNT(phone)                 AS students_with_phone,           -- 13: 2 phones are NULL
+    COUNT(DISTINCT program_id)   AS distinct_programs_represented  -- 4: MSc has no students
 FROM students;
 
+
 -- =============================================================================
--- 3. Summation, Averages, Minimums, and Maximums
+-- 3. Payroll Summation, Averages, Minimums, and Maximums
 -- =============================================================================
 
+-- Lecturer compensation statistics (amounts in Rwandan Francs - RWF):
 SELECT 
-    COUNT(*)                      AS total_instructors,
-    SUM(salary)                   AS total_payroll,
-    ROUND(AVG(salary), 2)         AS average_salary,
-    MIN(salary)                   AS minimum_salary,
-    MAX(salary)                   AS maximum_salary
-FROM instructors;
+    COUNT(*)                          AS total_lecturers,
+    SUM(monthly_salary)               AS total_monthly_payroll,
+    ROUND(AVG(monthly_salary), 2)     AS average_monthly_salary,
+    MIN(monthly_salary)               AS lowest_monthly_salary,
+    MAX(monthly_salary)               AS highest_monthly_salary
+FROM lecturers;
+
 
 -- =============================================================================
 -- 4. Aggregates on Filtered Data
 -- =============================================================================
 
--- Calculate metrics only for department 1
+-- Fee collection summary for the active semester (from payments):
 SELECT 
-    ROUND(AVG(gpa), 2) AS cs_average_gpa,
-    MAX(gpa)          AS cs_highest_gpa,
-    MIN(gpa)          AS cs_lowest_gpa
-FROM students
-WHERE department_id = 1;
+    COUNT(*)                 AS total_payments_received,
+    SUM(amount)              AS total_revenue_collected,
+    ROUND(AVG(amount), 2)    AS average_payment_amount,
+    MAX(amount)              AS largest_single_payment
+FROM payments;
+
 
 -- =============================================================================
--- 5. Conditional Aggregation with CASE
+-- 5. Institutional Summary Metrics (From student_balances view)
 -- =============================================================================
--- Count students meeting specific conditions in a single query:
+
+-- Total financial standing across the entire university:
+SELECT 
+    SUM(total_billed)       AS total_invoiced,
+    SUM(total_scholarships) AS total_scholarships_awarded,
+    SUM(total_paid)         AS total_fees_collected,
+    SUM(balance_due)        AS total_outstanding_debt
+FROM student_balances;
+
+
+-- =============================================================================
+-- 6. Conditional Aggregation with CASE
+-- =============================================================================
+-- Compute multiple category counts in a single pass without subqueries:
 
 SELECT 
     COUNT(*) AS total_students,
-    COUNT(CASE WHEN gpa >= 3.50 THEN 1 END) AS high_achievers,
-    COUNT(CASE WHEN status = 'Active' THEN 1 END) AS active_students,
-    ROUND(AVG(CASE WHEN department_id = 1 THEN gpa END), 2) AS avg_cs_gpa
+    COUNT(CASE WHEN status = 'Active' THEN 1 END)    AS active_students,
+    COUNT(CASE WHEN status = 'Suspended' THEN 1 END) AS suspended_students,
+    COUNT(CASE WHEN status = 'Graduated' THEN 1 END) AS graduated_students
 FROM students;
 
+
 -- =============================================================================
--- 6. Practice Questions
+-- 7. Practice Exercises
 -- =============================================================================
--- Exercise 1: Calculate the average numeric_grade across all completed enrollments.
--- Exercise 2: Find the total budget allocated across all university departments.
--- Exercise 3: Explain why AVG(numeric_grade) will differ if missing grades are stored 
---             as 0 versus NULL.
+-- Exercise 1: Calculate the average capacity of all course offering classrooms.
+-- Exercise 2: Find the total amount awarded across all scholarships in student_scholarships.
+-- Exercise 3: Calculate the total number of credits across all courses in the catalog.

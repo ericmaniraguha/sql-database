@@ -1,79 +1,160 @@
 /*
 ================================================================================
 Topic: Date and Time Functions
-Objective: Manipulate dates, extract temporal components (year, month, day), 
-           calculate differences, and perform date arithmetic.
-Database: PostgreSQL / MySQL / Oracle
+Objective: Get the current date, extract parts of a date, calculate ages and
+           durations, add intervals, and format dates for reports.
+Database: PostgreSQL (pgAdmin)
+          MySQL / Oracle equivalents are given in the comments
 ================================================================================
 */
 
 -- =============================================================================
 -- 1. Concept Overview
 -- =============================================================================
--- Handling dates correctly is vital for business applications.
--- Standard SQL defines CURRENT_DATE and CURRENT_TIMESTAMP to obtain the current
--- system date and timestamp without parentheses.
+-- DATE       a calendar day                    '2026-09-07'
+-- TIMESTAMP  a day plus a time                 '2026-09-07 08:30:00'
+-- INTERVAL   a length of time                  INTERVAL '3 months'
+--
+-- Results that use CURRENT_DATE change every day. To get the same answers as
+-- the comments in this file, most queries use a fixed reference date:
+-- DATE '2026-09-07', the first day of the current term.
+
 
 -- =============================================================================
--- 2. Getting Current System Date & Time
+-- 2. Today's Date and Time
 -- =============================================================================
+SELECT
+    CURRENT_DATE      AS today,
+    CURRENT_TIMESTAMP AS right_now,
+    NOW()             AS also_right_now;          -- PostgreSQL / MySQL
+-- MySQL: CURDATE(), NOW()     Oracle: SYSDATE, SYSTIMESTAMP
 
-SELECT 
-    CURRENT_DATE      AS today_date,
-    CURRENT_TIMESTAMP AS current_moment;
-
--- In MySQL: NOW(), CURDATE()
--- In Oracle: SYSDATE, SYSTIMESTAMP
 
 -- =============================================================================
--- 3. Extracting Date Parts: EXTRACT
+-- 3. Extracting Parts of a Date: EXTRACT
 -- =============================================================================
--- The ANSI SQL standard function EXTRACT retrieves specific fields:
-
-SELECT 
-    instructor_id,
+SELECT
+    first_name,
+    last_name,
     hire_date,
     EXTRACT(YEAR  FROM hire_date) AS hire_year,
     EXTRACT(MONTH FROM hire_date) AS hire_month,
     EXTRACT(DAY   FROM hire_date) AS hire_day
-FROM instructors;
+FROM lecturers
+ORDER BY hire_date;
+-- MySQL also has YEAR(hire_date), MONTH(hire_date), DAY(hire_date).
 
--- MySQL alternative functions:
--- SELECT YEAR(hire_date), MONTH(hire_date), DAY(hire_date) FROM instructors;
+-- Use EXTRACT in WHERE: lecturers hired in a February
+SELECT first_name, last_name, hire_date
+FROM lecturers
+WHERE EXTRACT(MONTH FROM hire_date) = 2;          -- Claudine, Ange, Josiane
+
 
 -- =============================================================================
--- 4. Calculating Age and Tenures
+-- 4. Ages and Lengths of Service
 -- =============================================================================
+-- Subtracting years is only APPROXIMATE: it ignores whether the birthday has
+-- happened yet this year. AGE() is exact (PostgreSQL).
+SELECT
+    first_name,
+    date_of_birth,
+    2026 - EXTRACT(YEAR FROM date_of_birth)                 AS approx_age,
+    EXTRACT(YEAR FROM AGE(DATE '2026-09-07', date_of_birth)) AS exact_age
+FROM students
+ORDER BY date_of_birth;
+-- Patrick (born 2003-01-30) is 23 either way; Jean (born 2004-11-02) is
+-- approx 22 but exactly 21 on 7 Sept 2026. Kevin has no birth date: NULL age.
+-- MySQL: TIMESTAMPDIFF(YEAR, date_of_birth, '2026-09-07')
+-- Oracle: TRUNC(MONTHS_BETWEEN(DATE '2026-09-07', date_of_birth) / 12)
 
--- Calculate approximate student age in years (Standard cross-database arithmetic):
-SELECT 
-    student_id,
+-- Years of service on the first day of term
+SELECT
     first_name,
     last_name,
-    birth_date,
-    EXTRACT(YEAR FROM CURRENT_DATE) - EXTRACT(YEAR FROM birth_date) AS approximate_age
-FROM students;
+    hire_date,
+    AGE(DATE '2026-09-07', hire_date)                        AS service_length,
+    EXTRACT(YEAR FROM AGE(DATE '2026-09-07', hire_date))     AS full_years
+FROM lecturers
+ORDER BY hire_date;
 
--- In PostgreSQL (precise AGE function):
--- SELECT first_name, AGE(CURRENT_DATE, birth_date) AS exact_age FROM students;
-
--- In MySQL (TIMESTAMPDIFF):
--- SELECT first_name, TIMESTAMPDIFF(YEAR, birth_date, CURDATE()) AS exact_age FROM students;
 
 -- =============================================================================
--- 5. Date Arithmetic (Adding / Subtracting Intervals)
+-- 5. Differences Between Dates
 -- =============================================================================
+-- In PostgreSQL, DATE - DATE = a whole number of days.
+SELECT
+    academic_year,
+    term_name,
+    end_date - start_date         AS term_length_days,
+    (end_date - start_date) / 7   AS term_length_weeks      -- integer division
+FROM academic_terms
+ORDER BY start_date;
 
--- In PostgreSQL / ANSI:
--- SELECT CURRENT_DATE + INTERVAL '30 days' AS future_date;
--- SELECT CURRENT_DATE - INTERVAL '1 year'   AS one_year_ago;
+-- How many days each student had to pay their invoice
+SELECT
+    invoice_id,
+    issue_date,
+    due_date,
+    due_date - issue_date AS days_allowed
+FROM invoices
+WHERE invoice_id IN (1, 14);                       -- 46 days, 44 days
+-- MySQL: DATEDIFF(due_date, issue_date)   Oracle: due_date - issue_date
 
--- In MySQL:
--- SELECT DATE_ADD(CURRENT_DATE, INTERVAL 30 DAY) AS future_date;
--- SELECT DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR) AS one_year_ago;
 
 -- =============================================================================
--- 6. Practice Questions
+-- 6. Adding and Subtracting Time
 -- =============================================================================
--- Exercise 1: Find all instructors who have worked at the university for more than 5 years.
--- Exercise 2: Find all students who were born in the month of February or April.
+SELECT
+    due_date,
+    due_date + 14                    AS with_two_week_grace,   -- DATE + integer days
+    due_date + INTERVAL '1 month'    AS one_month_later,
+    due_date - INTERVAL '1 year'     AS one_year_earlier
+FROM invoices
+WHERE invoice_id = 1;
+-- MySQL:  DATE_ADD(due_date, INTERVAL 14 DAY)
+-- Oracle: due_date + 14,  ADD_MONTHS(due_date, 1)
+
+-- Lecturers' 10-year service anniversary
+SELECT
+    first_name,
+    hire_date,
+    hire_date + INTERVAL '10 years' AS ten_year_anniversary
+FROM lecturers
+ORDER BY hire_date;
+
+
+-- =============================================================================
+-- 7. Formatting Dates for Reports: TO_CHAR
+-- =============================================================================
+SELECT
+    payment_id,
+    payment_date,
+    TO_CHAR(payment_date, 'DD Mon YYYY') AS printed_date,     -- 28 Jan 2026
+    TO_CHAR(payment_date, 'Day')         AS weekday,
+    TO_CHAR(payment_date, 'YYYY-MM')     AS pay_month
+FROM payments
+ORDER BY payment_date
+LIMIT 5;
+-- MySQL: DATE_FORMAT(payment_date, '%d %b %Y')
+-- Oracle: TO_CHAR(payment_date, 'DD Mon YYYY')  (same as PostgreSQL)
+
+-- DATE_TRUNC rounds a date DOWN to the start of its month / year (PostgreSQL)
+SELECT
+    payment_date,
+    DATE_TRUNC('month', payment_date)::DATE AS month_start
+FROM payments
+ORDER BY payment_date
+LIMIT 5;
+
+
+-- =============================================================================
+-- 8. Practice Exercises
+-- =============================================================================
+-- Exercise 1: List lecturers who had at least 10 full years of service on
+--             2026-09-07.
+-- Exercise 2: List students born in February or April.
+-- Exercise 3: For each payment, show how many days before (negative) or after
+--             (positive) its invoice due date it was made. Hint: you need
+--             payments and invoices; try it again after module 07 (joins).
+-- Exercise 4: Show the date of the last day of each academic term as
+--             'Friday, 22 January 2027' using TO_CHAR.

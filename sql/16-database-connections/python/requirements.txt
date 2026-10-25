@@ -1,0 +1,6 @@
+# Python libraries for the module 16 lessons.
+# Install inside a virtual environment:  pip install -r requirements.txt
+psycopg[binary]>=3.1    # PostgreSQL driver (scripts 01-03)
+SQLAlchemy>=2.0         # database engine used by pandas (script 04)
+pandas>=2.0             # tables of data in Python (script 04)
+python-dotenv>=1.0      # reads connection settings from the .env file

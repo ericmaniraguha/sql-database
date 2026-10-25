@@ -1,86 +1,143 @@
 /*
 ================================================================================
 Topic: Constraints: UNIQUE, CHECK, NOT NULL, and DEFAULT
-Objective: Learn how to enforce domain integrity, prevent invalid data entry, 
-           and maintain data quality using SQL constraints.
-Database: PostgreSQL / MySQL 8.0+ / Oracle
+Objective: Enforce business rules in the ULK University database with single
+           and composite UNIQUE constraints, CHECK expressions, NOT NULL and
+           DEFAULT values, and see the database reject bad data.
+Database: PostgreSQL (pgAdmin)
+          MySQL 8.0.16+ / Oracle: same syntax
 ================================================================================
 */
 
 -- =============================================================================
 -- 1. Concept Overview
 -- =============================================================================
--- Constraints enforce business logic and data integrity at the database layer:
--- - NOT NULL: Prohibits missing/null values in a column.
--- - UNIQUE: Ensures all values in a column or set of columns are distinct.
--- - CHECK: Validates that all values in a column satisfy a Boolean expression.
--- - DEFAULT: Assigns an automatic fallback value when no value is supplied.
+-- Constraints are business rules enforced by the database itself, so no
+-- application, script or typo can store invalid data:
+--
+-- - NOT NULL : the value is required.
+-- - UNIQUE   : no two rows may share the value (or the combination of values).
+-- - CHECK    : the row must make a TRUE/FALSE condition TRUE.
+-- - DEFAULT  : value used when an INSERT does not supply one.
+--
+-- Constraints can be written INLINE in CREATE TABLE (as in 01_create_tables.sql)
+-- or added later with ALTER TABLE ... ADD CONSTRAINT <name> ...
+
 
 -- =============================================================================
--- 2. Applying UNIQUE Constraints
+-- 2. The Constraints Our Tables Already Have
 -- =============================================================================
+-- Examples from 01_create_tables.sql:
+--   email          VARCHAR(100) NOT NULL UNIQUE,              -- single-column UNIQUE
+--   UNIQUE (student_id, offering_id)                          -- composite UNIQUE
+--   credits        INTEGER NOT NULL CHECK (credits BETWEEN 1 AND 20),
+--   status         VARCHAR(20) NOT NULL DEFAULT 'Active'
+--                  CHECK (status IN ('Active', 'Suspended', 'Withdrawn', 'Graduated'))
+--
+-- Inline constraints get generated names such as students_email_key
+-- (UNIQUE) or courses_credits_check (CHECK). List them all:
 
--- Ensure department codes and names are globally unique
-ALTER TABLE departments
-ADD CONSTRAINT uq_departments_code UNIQUE (department_code);
+SELECT
+    conrelid::regclass         AS table_name,
+    conname                    AS constraint_name,
+    CASE contype WHEN 'u' THEN 'UNIQUE' WHEN 'c' THEN 'CHECK' END AS constraint_type,
+    pg_get_constraintdef(oid)  AS definition
+FROM pg_constraint
+WHERE contype IN ('u', 'c')
+  AND connamespace = 'public'::regnamespace
+ORDER BY conrelid::regclass::text, contype, conname;
 
-ALTER TABLE departments
-ADD CONSTRAINT uq_departments_name UNIQUE (department_name);
 
--- Ensure instructor and student email addresses are unique
-ALTER TABLE instructors
-ADD CONSTRAINT uq_instructors_email UNIQUE (email);
+-- =============================================================================
+-- 3. Watching Constraints Reject Bad Data
+-- =============================================================================
+-- Each statement below breaks one rule. Uncomment one at a time to see the error.
 
+-- NOT NULL: every student needs a last name
+-- INSERT INTO students (registration_no, first_name, last_name, email, admission_year, program_id)
+-- VALUES ('2026CS099', 'Test', NULL, 'test.student@uni.example', 2026, 1);
+-- Expected: ERROR: null value in column "last_name" of relation "students" violates not-null constraint
+
+-- UNIQUE: registration number 2024CS001 already belongs to Aline Uwase
+-- INSERT INTO students (registration_no, first_name, last_name, email, admission_year, program_id)
+-- VALUES ('2024CS001', 'Test', 'Student', 'test.student@uni.example', 2026, 1);
+-- Expected: ERROR: duplicate key value violates unique constraint "students_registration_no_key"
+
+-- Composite UNIQUE: student 1 is already enrolled in offering 1
+-- INSERT INTO enrollments (student_id, offering_id, enrollment_date)
+-- VALUES (1, 1, '2026-09-10');
+-- Expected: ERROR: duplicate key value violates unique constraint "enrollments_student_id_offering_id_key"
+
+-- CHECK: 'Certificate' is not an allowed degree level
+-- INSERT INTO programs (program_name, degree_level, duration_years, department_id)
+-- VALUES ('Certificate in Coding', 'Certificate', 1, 1);
+-- Expected: ERROR: new row for relation "programs" violates check constraint "programs_degree_level_check"
+
+-- CHECK: salaries must be positive
+-- UPDATE lecturers SET monthly_salary = -50000 WHERE lecturer_id = 1;
+-- Expected: ERROR: new row for relation "lecturers" violates check constraint "lecturers_monthly_salary_check"
+
+
+-- =============================================================================
+-- 4. DEFAULT Values
+-- =============================================================================
+-- status is not listed in the INSERT, so the DEFAULT 'Active' is used.
+-- RETURNING shows the row that was stored. ROLLBACK then removes it again.
+BEGIN;
+    INSERT INTO students (registration_no, first_name, last_name, email, admission_year, program_id)
+    VALUES ('2026CS099', 'Test', 'Student', 'test.student@uni.example', 2026, 1)
+    RETURNING student_id, registration_no, status;     -- status = 'Active'
+ROLLBACK;
+
+
+-- =============================================================================
+-- 5. Adding NEW Named Business Rules with ALTER TABLE
+-- =============================================================================
+-- Naming a constraint (chk_..., uq_...) makes error messages readable and
+-- lets you drop it later by name.
+-- DROP CONSTRAINT IF EXISTS first makes this section safe to run twice.
+
+-- Rule 1 (CHECK): emails must look like name@domain
+ALTER TABLE students DROP CONSTRAINT IF EXISTS chk_students_email_format;
 ALTER TABLE students
-ADD CONSTRAINT uq_students_email UNIQUE (email);
+    ADD CONSTRAINT chk_students_email_format
+    CHECK (email LIKE '%_@_%');
 
--- Ensure course code (e.g., 'CS101') is unique
-ALTER TABLE courses
-ADD CONSTRAINT uq_courses_code UNIQUE (course_code);
+-- Rule 2 (CHECK across columns): deductions cannot exceed the gross salary
+ALTER TABLE salary_payments DROP CONSTRAINT IF EXISTS chk_salary_deductions;
+ALTER TABLE salary_payments
+    ADD CONSTRAINT chk_salary_deductions
+    CHECK (tax_amount + other_deductions <= gross_amount);
 
--- Composite Unique Constraint: A student can only enroll once in the same course during the same term
+-- Rule 3 (composite UNIQUE): a room hosts only one offering per term
+ALTER TABLE course_offerings DROP CONSTRAINT IF EXISTS uq_offerings_term_room;
+ALTER TABLE course_offerings
+    ADD CONSTRAINT uq_offerings_term_room
+    UNIQUE (term_id, room);
+-- Note: offering 10 has room = NULL. UNIQUE ignores NULLs, so several
+-- offerings may still have "no room yet" in the same term.
+
+-- Rule 4 (DEFAULT): enrollment_date defaults to today when not supplied
 ALTER TABLE enrollments
-ADD CONSTRAINT uq_student_term_course UNIQUE (student_id, course_id, semester, academic_year);
+    ALTER COLUMN enrollment_date SET DEFAULT CURRENT_DATE;
+
+-- Test Rule 3 (uncomment): offering 1 already uses room A-101 in term 1
+-- UPDATE course_offerings SET room = 'A-101' WHERE offering_id = 2;
+-- Expected: ERROR: duplicate key value violates unique constraint "uq_offerings_term_room"
+
+-- IMPORTANT: ADD CONSTRAINT checks the rows ALREADY in the table. If any
+-- existing row breaks the rule, the ALTER TABLE fails and nothing changes.
+
+-- What a CHECK constraint CANNOT do: compare with another table.
+-- "score <= assessments.max_score" needs data from a second table, so it must
+-- be enforced with a trigger or by the application instead.
+
 
 -- =============================================================================
--- 3. Applying CHECK Constraints
+-- 6. Practice Exercises
 -- =============================================================================
-
--- Department budget must not be negative
-ALTER TABLE departments
-ADD CONSTRAINT chk_departments_budget CHECK (budget >= 0.00);
-
--- Instructor salary must be positive and have a minimum wage
-ALTER TABLE instructors
-ADD CONSTRAINT chk_instructors_salary CHECK (salary >= 20000.00);
-
--- Student GPA must be between 0.00 and 4.00
-ALTER TABLE students
-ADD CONSTRAINT chk_students_gpa CHECK (gpa >= 0.00 AND gpa <= 4.00);
-
--- Student status must belong to allowed categories
-ALTER TABLE students
-ADD CONSTRAINT chk_students_status CHECK (status IN ('Active', 'Suspended', 'Graduated', 'Withdrawn'));
-
--- Enrollment numeric grade must be between 0 and 100
-ALTER TABLE enrollments
-ADD CONSTRAINT chk_enrollments_numeric_grade CHECK (numeric_grade >= 0.00 AND numeric_grade <= 100.00);
-
--- Course credits must be between 1 and 6
-ALTER TABLE courses
-ADD CONSTRAINT chk_courses_credits CHECK (credits BETWEEN 1 AND 6);
-
--- =============================================================================
--- 4. Testing Constraint Violations (Expected to Fail)
--- =============================================================================
-
--- The following statement violates chk_students_gpa:
--- INSERT INTO students (first_name, last_name, email, birth_date, gpa) 
--- VALUES ('John', 'Doe', 'johndoe@ulk.ac.rw', '2001-05-15', 4.50); 
--- ERROR: Check constraint violation
-
--- =============================================================================
--- 5. Practice Questions
--- =============================================================================
--- Exercise 1: Write a CHECK constraint ensuring instructor email contains an '@' symbol.
--- Exercise 2: Write a CHECK constraint ensuring semester is only 'Fall', 'Spring', or 'Summer'.
+-- Exercise 1: Add a CHECK constraint named chk_students_phone ensuring 'phone'
+--             starts with '+250'. Does it accept students whose phone is NULL? Why?
+-- Exercise 2: Add a composite UNIQUE constraint ensuring a lecturer is not paid
+--             twice on the same payment_date. Does the existing data allow it?
+-- Exercise 3: Why should money columns always have a CHECK (amount >= 0) constraint?

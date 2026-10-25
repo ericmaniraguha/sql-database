@@ -1,81 +1,161 @@
 /*
 ================================================================================
 Topic: Conditional Logic with CASE Expressions
-Objective: Implement IF-THEN-ELSE conditional logic directly inside SQL queries 
-           using Simple CASE and Searched CASE expressions.
-Database: PostgreSQL / MySQL / Oracle
+Objective: Write IF-THEN-ELSE logic inside SQL with searched and simple CASE,
+           and use CASE in SELECT, ORDER BY, aggregates and UPDATE.
+Database: PostgreSQL (pgAdmin)
+          MySQL / Oracle: identical CASE syntax
 ================================================================================
 */
 
 -- =============================================================================
 -- 1. Concept Overview
 -- =============================================================================
--- The CASE expression is SQL's universal conditional construct.
--- It can be used anywhere an expression is valid (SELECT, WHERE, ORDER BY, GROUP BY).
--- - Searched CASE: Evaluates multiple independent Boolean expressions (WHEN condition THEN result).
--- - Simple CASE: Compares a single expression against target values (CASE expr WHEN val THEN result).
+-- Searched CASE: each WHEN has its own condition.
+--     CASE
+--         WHEN condition_1 THEN result_1
+--         WHEN condition_2 THEN result_2
+--         ELSE default_result
+--     END
+-- Simple CASE: one expression compared with several values.
+--     CASE expression
+--         WHEN value_1 THEN result_1
+--         ELSE default_result
+--     END
+--
+-- Rules:
+-- - The FIRST true WHEN wins; later WHENs are not checked. Order matters!
+-- - Without ELSE, a row that matches no WHEN gets NULL.
+-- - CASE is an expression: use it wherever a value is allowed.
+
 
 -- =============================================================================
--- 2. Searched CASE: Grading and Academic Standing
+-- 2. Searched CASE: Classifying Values into Ranges
 -- =============================================================================
-
-SELECT 
-    student_id,
-    first_name,
-    last_name,
+-- Degree classification from the GPA view
+SELECT
+    student_name,
     gpa,
-    CASE 
-        WHEN gpa >= 3.80 THEN 'First Class Honours / Summa Cum Laude'
-        WHEN gpa >= 3.50 THEN 'Second Class Upper / Magna Cum Laude'
-        WHEN gpa >= 3.00 THEN 'Second Class Lower'
-        WHEN gpa >= 2.00 THEN 'Pass'
+    CASE
+        WHEN gpa >= 3.60 THEN 'First Class'
+        WHEN gpa >= 3.00 THEN 'Second Class Upper'
+        WHEN gpa >= 2.00 THEN 'Second Class Lower'
+        WHEN gpa >= 1.00 THEN 'Pass'
         ELSE 'Academic Probation'
-    END AS academic_distinction
-FROM students
+    END AS classification
+FROM student_gpa
 ORDER BY gpa DESC;
 
--- =============================================================================
--- 3. Simple CASE: Decoding Value Codes
--- =============================================================================
+-- Order matters: if 'gpa >= 1.00' came first, EVERY student with a GPA of
+-- 1.00 or more would be labelled 'Pass'.
 
-SELECT 
-    course_id,
+
+-- =============================================================================
+-- 3. CASE vs. a Lookup Table
+-- =============================================================================
+-- You could turn percentages into letters with CASE...
+SELECT
+    student_id,
     course_code,
-    department_id,
-    CASE department_id
-        WHEN 1 THEN 'Computing & Informatics'
-        WHEN 2 THEN 'Economics & Management'
-        WHEN 3 THEN 'Faculty of Law'
-        WHEN 4 THEN 'School of Engineering'
-        ELSE 'Other Faculty'
-    END AS faculty_group
-FROM courses;
+    final_percent,
+    CASE
+        WHEN final_percent >= 80 THEN 'A'
+        WHEN final_percent >= 70 THEN 'B'
+        WHEN final_percent >= 60 THEN 'C'
+        WHEN final_percent >= 50 THEN 'D'
+        ELSE 'F'
+    END          AS letter_from_case,
+    letter_grade AS letter_from_grade_scale
+FROM final_grades
+ORDER BY final_percent DESC;
+-- ...but our database stores the rules in the grade_scale TABLE instead.
+-- If the university changes the scale, we update 5 rows in grade_scale
+-- rather than editing every query that contains this CASE.
+
 
 -- =============================================================================
--- 4. CASE in ORDER BY Clauses (Custom Sort Order)
+-- 4. Simple CASE: Translating Codes
 -- =============================================================================
--- Sort instructors by seniority rank rather than alphabetical order:
+SELECT
+    registration_no,
+    first_name,
+    status,
+    CASE status
+        WHEN 'Active'    THEN 'May register for courses'
+        WHEN 'Suspended' THEN 'Must see the Dean first'
+        ELSE 'No longer studying'
+    END AS registration_rule
+FROM students
+ORDER BY status, registration_no;
 
-SELECT 
-    instructor_id,
+-- Careful: simple CASE uses "=", so "CASE phone WHEN NULL" never matches.
+-- Test for NULL with a searched CASE:
+SELECT
+    first_name,
+    CASE
+        WHEN phone IS NULL THEN 'Missing - ask the student'
+        ELSE phone
+    END AS phone_check
+FROM students
+WHERE student_id IN (5, 6);
+
+
+-- =============================================================================
+-- 5. CASE in ORDER BY: a Custom Sort Order
+-- =============================================================================
+-- Sort lecturers by seniority instead of alphabetically
+SELECT
     first_name,
     last_name,
     academic_rank
-FROM instructors
-ORDER BY 
+FROM lecturers
+ORDER BY
     CASE academic_rank
         WHEN 'Professor'           THEN 1
         WHEN 'Associate Professor' THEN 2
         WHEN 'Senior Lecturer'     THEN 3
         WHEN 'Lecturer'            THEN 4
         WHEN 'Assistant Lecturer'  THEN 5
-        ELSE 6
-    END ASC;
+    END,
+    last_name;
+
 
 -- =============================================================================
--- 5. Practice Questions
+-- 6. CASE Inside Aggregates: Counting by Category (preview of module 06)
 -- =============================================================================
--- Exercise 1: Categorize instructors into salary brackets: 'High' (> 70k), 
---             'Medium' (50k-70k), and 'Entry' (< 50k).
--- Exercise 2: Use CASE in an UPDATE statement to convert numeric_grade in enrollments 
---             to letter_grade ('A' >= 90, 'B' >= 80, 'C' >= 70, etc.).
+-- One row that counts students per status
+SELECT
+    COUNT(*)                                             AS all_students,     -- 15
+    SUM(CASE WHEN status = 'Active'    THEN 1 ELSE 0 END) AS active,          -- 12
+    SUM(CASE WHEN status = 'Graduated' THEN 1 ELSE 0 END) AS graduated,       -- 1
+    SUM(CASE WHEN status IN ('Suspended', 'Withdrawn')
+             THEN 1 ELSE 0 END)                          AS inactive          -- 2
+FROM students;
+
+
+-- =============================================================================
+-- 7. CASE in an UPDATE
+-- =============================================================================
+-- Increase capacity: large rooms +10 seats, smaller rooms +5 (practice only).
+BEGIN;
+    UPDATE course_offerings
+    SET capacity = CASE
+                       WHEN capacity >= 60 THEN capacity + 10
+                       ELSE capacity + 5
+                   END
+    WHERE term_id = 3
+    RETURNING offering_id, capacity;              -- 40 -> 45, 45 -> 50
+ROLLBACK;
+
+
+-- =============================================================================
+-- 8. Practice Exercises
+-- =============================================================================
+-- Exercise 1: Put lecturers into salary bands: 'Senior' (2,000,000 RWF or more),
+--             'Middle' (1,200,000 to 1,999,999) and 'Junior' (below 1,200,000).
+-- Exercise 2: Using student_balances, label each invoice 'Paid' (balance 0),
+--             'Nothing paid' (total_paid = 0) or 'Partly paid'.
+-- Exercise 3: Label each assessment 'Exam' when its type is 'Final Exam' and
+--             'Continuous assessment' otherwise.
+-- Exercise 4: Count, in one row, how many enrollments are Registered, Completed
+--             and Dropped.

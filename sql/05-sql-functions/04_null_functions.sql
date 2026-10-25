@@ -1,73 +1,140 @@
 /*
 ================================================================================
-Topic: NULL Handling Functions: COALESCE and NULLIF
-Objective: Provide fallback defaults for NULL values, convert sentinel values 
-           to NULL, and prevent division-by-zero errors.
-Database: PostgreSQL / MySQL / Oracle
+Topic: NULL Functions: COALESCE and NULLIF
+Objective: Replace NULLs with sensible defaults, pick the first available
+           value from several columns, and use NULLIF to avoid division by zero.
+Database: PostgreSQL (pgAdmin)
+          MySQL: IFNULL(a, b) is a 2-argument COALESCE
+          Oracle: NVL(a, b) is a 2-argument COALESCE
+          COALESCE and NULLIF work in all three
 ================================================================================
 */
 
 -- =============================================================================
 -- 1. Concept Overview
 -- =============================================================================
--- - COALESCE(val1, val2, ...): Returns the first non-NULL expression from its 
---   argument list. This is the ANSI SQL standard function for handling NULL fallbacks.
--- - NULLIF(expr1, expr2): Returns NULL if expr1 equals expr2; otherwise returns expr1.
---   Extremely useful for avoiding division by zero!
+-- COALESCE(a, b, c, ...)  returns the FIRST argument that is not NULL.
+-- NULLIF(a, b)            returns NULL when a = b, otherwise returns a.
+--
+-- Both are ANSI standard, so prefer them to IFNULL / NVL / ISNULL: the same
+-- query then runs on every database.
+
 
 -- =============================================================================
--- 2. Fallback Defaults with COALESCE
+-- 2. COALESCE: a Default for Missing Values
 -- =============================================================================
 
--- Display 'Unassigned' when instructor office_number or department is NULL
-SELECT 
-    instructor_id,
+-- Show a readable text instead of an empty (NULL) cell
+SELECT
+    department_name,
+    COALESCE(building, 'Not assigned') AS building
+FROM departments
+ORDER BY department_id;                           -- Economics: 'Not assigned'
+
+SELECT
+    offering_id,
+    course_id,
+    COALESCE(room, 'TBA') AS room                 -- "to be announced"
+FROM course_offerings
+WHERE term_id = 3;
+
+
+-- =============================================================================
+-- 3. COALESCE with Several Fallbacks
+-- =============================================================================
+-- Best way to contact each student: phone if we have one, otherwise email.
+SELECT
     first_name,
     last_name,
-    COALESCE(office_number, 'Pending Assignment') AS office_location
-FROM instructors;
+    phone,
+    COALESCE(phone, email) AS best_contact
+FROM students
+WHERE student_id IN (5, 6, 11);                   -- Yves and Nadia fall back to email
 
--- COALESCE with multiple fallback levels
-SELECT 
-    student_id,
-    first_name,
-    COALESCE(status, 'Unknown Status', 'N/A') AS student_status
-FROM students;
+-- Cash payments without a receipt number get a generated one
+SELECT
+    payment_id,
+    payment_method,
+    COALESCE(reference_no, 'CASH-' || payment_id) AS reference
+FROM payments
+WHERE payment_method = 'Cash'
+ORDER BY payment_id;
 
--- Dialect equivalents:
--- MySQL: IFNULL(office_number, 'Pending Assignment')
--- Oracle: NVL(office_number, 'Pending Assignment')
 
 -- =============================================================================
--- 3. Preventing Division by Zero with NULLIF
+-- 4. COALESCE Needs Matching Data Types
 -- =============================================================================
--- In mathematics and SQL, dividing by zero causes a runtime error:
--- SELECT 100 / 0; -- Runtime Error: Division by zero!
--- Dividing by NULL, however, gracefully returns NULL.
+-- due_date is a DATE, so the fallback must be a DATE too.
+-- This FAILS (uncomment to see):
+-- SELECT COALESCE(due_date, 'not set') FROM assessments;
+-- Expected: ERROR: invalid input syntax for type date: "not set"
 
--- Safe ratio calculation:
-SELECT 
-    department_name,
+-- Fix: turn the date into text first
+SELECT
+    assessment_name,
+    COALESCE(TO_CHAR(due_date, 'YYYY-MM-DD'), 'not set') AS due
+FROM assessments
+WHERE offering_id = 9;                            -- Group Project: 'not set'
+
+
+-- =============================================================================
+-- 5. COALESCE Keeps Calculations Working
+-- =============================================================================
+-- Arithmetic with NULL gives NULL (module 04). Treat "no value" as 0 when it
+-- really means zero. Example: an invoice with no payments has paid 0, not NULL.
+-- The student_balances view does exactly this:
+--     COALESCE((SELECT SUM(p.amount) FROM payments p WHERE ...), 0) AS total_paid
+SELECT
+    invoice_id,
+    student_name,
+    total_paid,
+    balance_due
+FROM student_balances
+WHERE invoice_id IN (5, 9);                       -- no payments: total_paid = 0
+
+
+-- =============================================================================
+-- 6. NULLIF: Avoiding Division by Zero
+-- =============================================================================
+-- Dividing by zero is an error:   SELECT 100 / 0;
+--   Expected: ERROR: division by zero
+-- Dividing by NULL simply gives NULL. NULLIF(x, 0) turns a 0 into NULL:
+SELECT
     budget,
-    established_year,
-    -- Prevent division by zero if established_year was 0 or a denominator variable
-    ROUND(budget / NULLIF(established_year, 0), 2) AS budget_per_year_factor
-FROM departments;
+    students,
+    budget / NULLIF(students, 0) AS budget_per_student
+FROM (VALUES (900000, 3),
+             (500000, 0)) AS clubs(budget, students);   -- 2nd row: NULL, no error
+
+-- Real use: share of the net bill (after scholarships) that is still unpaid
+SELECT
+    student_name,
+    academic_year,
+    term_name,
+    balance_due,
+    ROUND(100.0 * balance_due
+          / NULLIF(total_billed - total_scholarships, 0), 1) AS percent_unpaid
+FROM student_balances
+WHERE balance_due > 0
+ORDER BY percent_unpaid DESC;
+
 
 -- =============================================================================
--- 4. Using NULLIF to Convert Empty Strings to NULL
+-- 7. NULLIF: Turning Placeholder Values into NULL
 -- =============================================================================
+-- Imported files often contain '' or 'N/A' instead of a real NULL.
+SELECT
+    raw_phone,
+    NULLIF(TRIM(raw_phone), '')  AS cleaned_phone       -- '' and '   ' become NULL
+FROM (VALUES ('+250788000001'), (''), ('   ')) AS import(raw_phone);
 
-SELECT 
-    student_id,
-    first_name,
-    -- If status is an empty string '', turn it into NULL
-    NULLIF(status, '') AS sanitized_status
-FROM students;
 
 -- =============================================================================
--- 5. Practice Questions
+-- 8. Practice Exercises
 -- =============================================================================
--- Exercise 1: Query enrollments and display 'In Progress' for any letter_grade that is NULL.
--- Exercise 2: Explain why COALESCE is preferred over vendor-specific functions like 
---             IFNULL (MySQL) or NVL (Oracle).
+-- Exercise 1: List all lecturers with their phone number, showing 'No phone'
+--             when it is missing.
+-- Exercise 2: List course offerings with their lecturer_id, showing 0 when no
+--             lecturer is assigned. Is 0 a good choice here? Why or why not?
+-- Exercise 3: Rewrite COALESCE(phone, email) using a CASE expression (file 05).
+-- Exercise 4: Why is COALESCE preferred over IFNULL (MySQL) or NVL (Oracle)?

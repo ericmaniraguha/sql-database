@@ -1,138 +1,147 @@
 /*
 ================================================================================
 Topic: Window Ranking Functions
-Objective: Assign sequential numbers, ranks, percentiles, and bucket quantiles 
-           to rows using ROW_NUMBER, RANK, DENSE_RANK, PERCENT_RANK, and NTILE.
-Database: PostgreSQL / MySQL 8.0+ / Oracle
+Objective: Number and rank rows with ROW_NUMBER, RANK and DENSE_RANK, compute
+           relative positions with PERCENT_RANK / CUME_DIST, split rows into
+           buckets with NTILE, and find the top N per group.
+Database: PostgreSQL (pgAdmin)
+          MySQL 8.0+ / Oracle: identical syntax
 ================================================================================
 */
 
 -- =============================================================================
--- 1. Concept Overview: Ranking Functions
+-- 1. Concept Overview
 -- =============================================================================
--- Ranking window functions calculate a rank or category for each row within a
--- partition, based on an ORDER BY specification.
+-- A window function calculates a value for EACH row from a "window" of
+-- related rows, WITHOUT collapsing the rows like GROUP BY does.
 --
--- Supported Ranking Functions:
--- 1. ROW_NUMBER()   : Assigns a unique, sequential integer (1, 2, 3...) with no ties.
--- 2. RANK()         : Assigns ranks with gaps for ties (1, 2, 2, 4...).
--- 3. DENSE_RANK()   : Assigns ranks without gaps for ties (1, 2, 2, 3...).
--- 4. PERCENT_RANK() : Computes the relative rank as a percentage between 0.0 and 1.0:
---                     Formula: (rank - 1) / (total_rows - 1)
--- 5. NTILE(n)       : Divides ordered rows into 'n' equal buckets (e.g. quartiles, deciles).
+--   function() OVER (PARTITION BY ...   -- optional: restart for each group
+--                    ORDER BY ...)      -- the order used for ranking
+--
+-- With ties (equal values) the three ranking functions differ:
+--   value    ROW_NUMBER  RANK  DENSE_RANK
+--   4.00         1         1       1
+--   4.00         2         1       1
+--   3.57         3         3       2       RANK skips 2; DENSE_RANK does not
+--
+-- PERCENT_RANK() = (rank - 1) / (rows - 1)   -> 0 for the first row, 1 for the last
+-- CUME_DIST()    = share of rows <= this row -> between 0 and 1
+-- NTILE(n)       = split the ordered rows into n buckets of (nearly) equal size
+
 
 -- =============================================================================
--- 2. Side-by-Side Comparison of ROW_NUMBER, RANK, and DENSE_RANK
+-- 2. ROW_NUMBER, RANK and DENSE_RANK Side by Side
 -- =============================================================================
-
-SELECT 
-    student_id,
-    first_name,
-    last_name,
+-- student_gpa has real ties: three students on 4.00, two on 3.00, two on 0.00.
+SELECT
+    student_name,
     gpa,
-    ROW_NUMBER() OVER (ORDER BY gpa DESC) AS row_num,
-    RANK()       OVER (ORDER BY gpa DESC) AS rnk,
-    DENSE_RANK() OVER (ORDER BY gpa DESC) AS dense_rnk
-FROM students
-ORDER BY gpa DESC;
+    ROW_NUMBER() OVER (ORDER BY gpa DESC) AS row_number,
+    RANK()       OVER (ORDER BY gpa DESC) AS rank,
+    DENSE_RANK() OVER (ORDER BY gpa DESC) AS dense_rank
+FROM student_gpa
+ORDER BY gpa DESC, student_name;
+-- ROW_NUMBER breaks ties arbitrarily. To make it repeatable, add a tie-breaker:
+--   ROW_NUMBER() OVER (ORDER BY gpa DESC, student_name)
+
 
 -- =============================================================================
--- 3. Relative Ranking: PERCENT_RANK()
+-- 3. Relative Position: PERCENT_RANK and CUME_DIST
 -- =============================================================================
--- Evaluates the percentile standing of each instructor's salary across the university:
-
-SELECT 
-    instructor_id,
+SELECT
     first_name,
     last_name,
-    salary,
-    RANK()         OVER (ORDER BY salary ASC) AS salary_asc_rank,
-    -- PERCENT_RANK: 0.0 = lowest earner, 1.0 = highest earner
-    ROUND(CAST(PERCENT_RANK() OVER (ORDER BY salary ASC) AS NUMERIC), 4) AS salary_percentile
-FROM instructors
-ORDER BY salary ASC;
+    monthly_salary,
+    RANK() OVER (ORDER BY monthly_salary)                              AS salary_rank,
+    ROUND((PERCENT_RANK() OVER (ORDER BY monthly_salary))::NUMERIC, 2) AS percent_rank,
+    ROUND((CUME_DIST()    OVER (ORDER BY monthly_salary))::NUMERIC, 2) AS cume_dist
+FROM lecturers
+ORDER BY monthly_salary;
+-- Lowest earner: percent_rank 0.00. Highest: 1.00.
+-- ::NUMERIC converts the floating-point result so ROUND(x, 2) can be used.
+
 
 -- =============================================================================
--- 4. Bucketing Rows with NTILE(n)
+-- 4. Buckets with NTILE
 -- =============================================================================
--- Divide students into 4 performance quartiles (Quartile 1 = Top 25% performers):
-
-SELECT 
-    student_id,
-    first_name,
-    last_name,
+-- Split the 12 graded students into 4 quartiles (1 = top 25%)
+SELECT
+    student_name,
     gpa,
-    NTILE(4) OVER (ORDER BY gpa DESC) AS performance_quartile
-FROM students
-ORDER BY performance_quartile ASC, gpa DESC;
+    NTILE(4) OVER (ORDER BY gpa DESC, student_name) AS quartile
+FROM student_gpa
+ORDER BY quartile, gpa DESC;                      -- 3 students per quartile
 
--- Divide instructors into 2 salary tiers (Higher Half vs Lower Half):
-SELECT 
-    instructor_id,
-    first_name,
-    last_name,
-    salary,
-    NTILE(2) OVER (ORDER BY salary DESC) AS salary_tier_group
-FROM instructors
-ORDER BY salary DESC;
 
 -- =============================================================================
--- 5. Partitioned Ranking: Top Performers Per Department
+-- 5. PARTITION BY: Ranking Inside Each Group
 -- =============================================================================
--- Ranks reset to 1 inside each department:
-
-SELECT 
-    department_id,
+-- Class position inside each course offering (the rank restarts at 1)
+SELECT
+    course_code,
+    academic_year,
+    term_name,
     student_id,
-    first_name,
-    last_name,
-    gpa,
-    DENSE_RANK() OVER (
-        PARTITION BY department_id 
-        ORDER BY gpa DESC
-    ) AS dept_rank,
-    NTILE(2) OVER (
-        PARTITION BY department_id 
-        ORDER BY gpa DESC
-    ) AS dept_half
-FROM students
-ORDER BY department_id, dept_rank;
+    final_percent,
+    RANK() OVER (PARTITION BY offering_id
+                 ORDER BY final_percent DESC) AS class_position
+FROM final_grades
+ORDER BY academic_year, course_code, class_position;
+
 
 -- =============================================================================
--- 6. Classic Query Pattern: Filtering Top N Per Group (via CTE)
+-- 6. Top N per Group
 -- =============================================================================
--- Note: Window functions cannot be placed directly in a WHERE clause!
--- Use a Common Table Expression (CTE) to filter by window results:
+-- Window functions run AFTER WHERE, so they cannot be used in WHERE:
+-- SELECT * FROM final_grades
+-- WHERE RANK() OVER (PARTITION BY offering_id ORDER BY final_percent DESC) <= 2;
+-- Expected: ERROR: window functions are not allowed in WHERE
+--
+-- Solution: calculate the rank in a CTE (or subquery), then filter it.
 
-WITH RankedDeptInstructors AS (
-    SELECT 
-        instructor_id,
+-- The 2 best students of every class
+WITH ranked AS (
+    SELECT
+        course_code,
+        academic_year,
+        term_name,
+        student_id,
+        final_percent,
+        ROW_NUMBER() OVER (PARTITION BY offering_id
+                           ORDER BY final_percent DESC) AS position
+    FROM final_grades
+)
+SELECT r.course_code, r.academic_year, r.term_name,
+       s.first_name || ' ' || s.last_name AS student,
+       r.final_percent, r.position
+FROM ranked r
+JOIN students s ON s.student_id = r.student_id
+WHERE r.position <= 2
+ORDER BY r.academic_year, r.course_code, r.position;
+
+-- The highest-paid lecturer in each department
+WITH ranked AS (
+    SELECT
+        department_id,
         first_name,
         last_name,
-        department_id,
-        salary,
-        DENSE_RANK() OVER (
-            PARTITION BY department_id 
-            ORDER BY salary DESC
-        ) AS salary_rank
-    FROM instructors
+        monthly_salary,
+        RANK() OVER (PARTITION BY department_id
+                     ORDER BY monthly_salary DESC) AS salary_rank
+    FROM lecturers
 )
-SELECT 
-    department_id,
-    instructor_id,
-    first_name,
-    last_name,
-    salary,
-    salary_rank
-FROM RankedDeptInstructors
-WHERE salary_rank <= 2
-ORDER BY department_id, salary_rank;
+SELECT department_id, first_name, last_name, monthly_salary
+FROM ranked
+WHERE salary_rank = 1
+ORDER BY department_id;                           -- 4 rows, one per department
+
 
 -- =============================================================================
--- 7. Practice Questions
+-- 7. Practice Exercises
 -- =============================================================================
--- Exercise 1: Using NTILE(3), divide all courses into 3 difficulty tiers based on credit hours.
--- Exercise 2: Using PERCENT_RANK(), find the percentile rank of students by GPA within 
---             their respective department.
--- Exercise 3: Explain the difference in output between RANK() and DENSE_RANK() when 
---             three students tie for 2nd place.
+-- Exercise 1: Use NTILE(3) to split the courses into 3 groups by credits.
+-- Exercise 2: Rank lecturers by hire_date (most senior first) within each
+--             department. Who is the most senior in each department?
+-- Exercise 3: Three students tie for 2nd place. What are the next ranks given by
+--             RANK() and by DENSE_RANK()?
+-- Exercise 4: List the lowest-scoring student of every class.

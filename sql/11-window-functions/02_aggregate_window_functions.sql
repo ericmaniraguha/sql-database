@@ -1,117 +1,157 @@
 /*
 ================================================================================
-Topic: Aggregate Window Functions: AVG, MAX, MIN, SUM, and COUNT
-Objective: Calculate window-scoped averages, maximums, minimums, running sums, 
-           and row counts while preserving individual row details.
-Database: PostgreSQL / MySQL 8.0+ / Oracle
+Topic: Aggregate Window Functions: SUM, AVG, COUNT, MIN, MAX with OVER
+Objective: Show group totals next to every row, compare rows with their group,
+           compute percentages of a total, running totals and moving averages,
+           and understand window frames (ROWS vs. RANGE).
+Database: PostgreSQL (pgAdmin)
+          MySQL 8.0+ / Oracle: identical syntax
 ================================================================================
 */
 
 -- =============================================================================
--- 1. Concept Overview: The 5 Core Aggregate Window Functions
+-- 1. Concept Overview
 -- =============================================================================
--- Unlike standard aggregate functions with GROUP BY (which collapse multiple rows 
--- into a single row), Aggregate Window Functions compute metrics over a specified 
--- window of rows while keeping each individual row distinct in the output.
+-- GROUP BY            : many rows in  -> ONE row per group out
+-- aggregate OVER (...) : many rows in  -> the SAME rows out, each one showing
+--                                        the aggregate of its window
 --
--- The Core Aggregate Window Functions:
--- 1. AVG()   : Calculates the average value in the window.
--- 2. MAX()   : Finds the maximum value in the window.
--- 3. MIN()   : Finds the minimum value in the window.
--- 4. SUM()   : Calculates the total sum of values in the window.
--- 5. COUNT() : Counts the number of rows or non-null values in the window.
-
--- =============================================================================
--- 2. Comprehensive Demonstration: All 5 Aggregates in One Query
--- =============================================================================
--- Inspect each instructor's salary alongside department-level aggregate benchmarks:
-
-SELECT 
-    instructor_id,
-    first_name,
-    last_name,
-    department_id,
-    salary,
-    -- 1. COUNT: Total instructors in this department
-    COUNT(*)               OVER (PARTITION BY department_id) AS dept_instructor_count,
-    -- 2. SUM: Total payroll for this department
-    SUM(salary)            OVER (PARTITION BY department_id) AS dept_total_payroll,
-    -- 3. AVG: Average salary in this department
-    ROUND(AVG(salary)      OVER (PARTITION BY department_id), 2) AS dept_avg_salary,
-    -- 4. MIN: Lowest salary in this department
-    MIN(salary)            OVER (PARTITION BY department_id) AS dept_min_salary,
-    -- 5. MAX: Highest salary in this department
-    MAX(salary)            OVER (PARTITION BY department_id) AS dept_max_salary
-FROM instructors
-ORDER BY department_id, salary DESC;
-
--- =============================================================================
--- 3. Comparative Analytics: Deviation from Window Benchmarks
--- =============================================================================
--- Compare each student's GPA to both the department average and department maximum:
-
-SELECT 
-    student_id,
-    first_name,
-    last_name,
-    department_id,
-    gpa,
-    ROUND(AVG(gpa) OVER (PARTITION BY department_id), 2) AS dept_avg_gpa,
-    MAX(gpa)       OVER (PARTITION BY department_id)     AS dept_max_gpa,
-    MIN(gpa)       OVER (PARTITION BY department_id)     AS dept_min_gpa,
-    -- Difference from department average
-    ROUND(gpa - AVG(gpa) OVER (PARTITION BY department_id), 2) AS diff_from_dept_avg,
-    -- Gap from department top performer
-    ROUND(MAX(gpa) OVER (PARTITION BY department_id) - gpa, 2) AS gap_to_first_place
-FROM students
-ORDER BY department_id, gpa DESC;
-
--- =============================================================================
--- 4. Cumulative Running Totals with SUM() and Window Framing
--- =============================================================================
--- When ORDER BY is present inside OVER(), the default frame is:
+--   SUM(x) OVER ()                         total of ALL rows
+--   SUM(x) OVER (PARTITION BY g)           total of the row's group
+--   SUM(x) OVER (PARTITION BY g ORDER BY t) RUNNING total inside the group
+--
+-- When OVER has an ORDER BY, the default frame is
 --   RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+-- = "from the first row up to this row AND every row tied with it" (Section 5).
 
--- Cumulative department payroll expenditure as faculty joined over time:
-SELECT 
+
+-- =============================================================================
+-- 2. Group Totals Next to Every Row
+-- =============================================================================
+SELECT
     department_id,
     first_name,
     last_name,
-    hire_date,
-    salary,
-    -- Cumulative running sum within department
-    SUM(salary) OVER (
-        PARTITION BY department_id 
-        ORDER BY hire_date ASC
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-    ) AS cumulative_dept_payroll
-FROM instructors
-ORDER BY department_id, hire_date ASC;
+    monthly_salary,
+    COUNT(*)                     OVER (PARTITION BY department_id) AS dept_lecturers,
+    SUM(monthly_salary)          OVER (PARTITION BY department_id) AS dept_payroll,
+    ROUND(AVG(monthly_salary)    OVER (PARTITION BY department_id), 0) AS dept_average,
+    MIN(monthly_salary)          OVER (PARTITION BY department_id) AS dept_lowest,
+    MAX(monthly_salary)          OVER (PARTITION BY department_id) AS dept_highest
+FROM lecturers
+ORDER BY department_id, monthly_salary DESC;
+
+-- The same numbers with GROUP BY give 4 rows and lose the lecturer names.
+
 
 -- =============================================================================
--- 5. Moving Averages with AVG() and Explicit Window Slices
+-- 3. Comparing Each Row with Its Group
 -- =============================================================================
--- Calculate a 3-row moving average (current row + 1 preceding + 1 following):
-
-SELECT 
-    enrollment_id,
-    student_id,
+-- Each result compared with its class average and the best result in the class
+SELECT
+    course_code,
     academic_year,
-    semester,
-    numeric_grade,
-    ROUND(AVG(numeric_grade) OVER (
-        ORDER BY academic_year ASC, semester ASC
-        ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING
-    ), 2) AS moving_avg_3_terms
-FROM enrollments
-WHERE numeric_grade IS NOT NULL
-ORDER BY academic_year, semester;
+    student_id,
+    final_percent,
+    ROUND(AVG(final_percent) OVER (PARTITION BY offering_id), 1)                 AS class_average,
+    ROUND(final_percent - AVG(final_percent) OVER (PARTITION BY offering_id), 1) AS vs_average,
+    MAX(final_percent) OVER (PARTITION BY offering_id) - final_percent           AS gap_to_best
+FROM final_grades
+ORDER BY academic_year, course_code, final_percent DESC;
+
 
 -- =============================================================================
--- 6. Practice Questions
+-- 4. Percentage of a Total
 -- =============================================================================
--- Exercise 1: Calculate each instructor's salary as an exact percentage of their 
---             department's total payroll using SUM() OVER (PARTITION BY department_id).
--- Exercise 2: Write a query showing each course along with the total count and average 
---             credits of all courses in the same department.
--- Exercise 3: What is the difference between `COUNT(*) OVER ()` and `COUNT(*) OVER (PARTITION BY department_id)`?
+SELECT
+    first_name,
+    last_name,
+    department_id,
+    monthly_salary,
+    ROUND(100.0 * monthly_salary
+          / SUM(monthly_salary) OVER (PARTITION BY department_id), 1) AS pct_of_department,
+    ROUND(100.0 * monthly_salary
+          / SUM(monthly_salary) OVER (), 1)                            AS pct_of_university
+FROM lecturers
+ORDER BY department_id, monthly_salary DESC;
+-- Each department's percentages add up to 100; the last column adds up to 100
+-- over the whole table.
+
+
+-- =============================================================================
+-- 5. Running Totals, and ROWS vs. RANGE
+-- =============================================================================
+-- Fees collected so far this term, payment by payment
+SELECT
+    payment_date,
+    invoice_id,
+    amount,
+    SUM(amount) OVER (ORDER BY payment_date) AS collected_so_far
+FROM payments
+WHERE payment_date >= '2026-08-01'
+ORDER BY payment_date;
+
+-- ROWS vs. RANGE only matters when the ORDER BY value is TIED.
+-- All 8 September salaries were paid on the SAME date:
+SELECT
+    payment_date,
+    lecturer_id,
+    gross_amount,
+    SUM(gross_amount) OVER (ORDER BY payment_date)            AS range_total,  -- default
+    SUM(gross_amount) OVER (ORDER BY payment_date, lecturer_id
+                            ROWS BETWEEN UNBOUNDED PRECEDING
+                                 AND CURRENT ROW)              AS rows_total
+FROM salary_payments
+WHERE pay_month = '2026-09'
+ORDER BY payment_date, lecturer_id;
+-- range_total shows 13,700,000 on EVERY row: RANGE includes all rows tied on
+--   payment_date, i.e. the whole day.
+-- rows_total grows row by row: 1,800,000 -> 3,100,000 -> ... -> 13,700,000.
+-- For running totals, write ROWS explicitly and give ORDER BY a tie-breaker.
+
+
+-- =============================================================================
+-- 6. Running Balance per Invoice (a Statement of Account)
+-- =============================================================================
+SELECT
+    p.invoice_id,
+    p.payment_date,
+    p.amount,
+    sb.total_billed - sb.total_scholarships                    AS net_bill,
+    sb.total_billed - sb.total_scholarships
+      - SUM(p.amount) OVER (PARTITION BY p.invoice_id
+                            ORDER BY p.payment_date
+                            ROWS BETWEEN UNBOUNDED PRECEDING
+                                 AND CURRENT ROW)              AS still_due
+FROM payments p
+JOIN student_balances sb ON sb.invoice_id = p.invoice_id
+WHERE p.invoice_id IN (1, 7, 15)                  -- the invoices paid in instalments
+ORDER BY p.invoice_id, p.payment_date;
+
+
+-- =============================================================================
+-- 7. Moving Averages with a Sliding Frame
+-- =============================================================================
+-- Average of this payment and the 2 before it (current-term payments)
+SELECT
+    payment_date,
+    amount,
+    ROUND(AVG(amount) OVER (ORDER BY payment_date
+                            ROWS BETWEEN 2 PRECEDING AND CURRENT ROW), 0) AS moving_avg_3
+FROM payments
+WHERE payment_date >= '2026-08-01'
+ORDER BY payment_date;
+-- The first two rows average fewer than 3 payments: there is nothing before them.
+
+
+-- =============================================================================
+-- 8. Practice Exercises
+-- =============================================================================
+-- Exercise 1: Show each invoice item with its share (%) of its invoice total,
+--             using SUM(amount) OVER (PARTITION BY invoice_id).
+-- Exercise 2: Show each course with the number of courses and the average
+--             credits in its department, without GROUP BY.
+-- Exercise 3: What is the difference between COUNT(*) OVER () and
+--             COUNT(*) OVER (PARTITION BY department_id)?
+-- Exercise 4: Compute the running total of net pay (gross - tax - deductions)
+--             over all salary_payments, ordered by pay_month and lecturer_id.

@@ -2,8 +2,9 @@
 ================================================================================
 Topic: Filtering Rows with WHERE, AND, OR, and NOT
 Objective: Understand Boolean logic, operator precedence, and compound predicates 
-           to filter relational datasets accurately.
-Database: PostgreSQL / MySQL / Oracle
+           to filter relational datasets accurately in the university database.
+Database: PostgreSQL (pgAdmin)
+          MySQL / Oracle: identical syntax
 ================================================================================
 */
 
@@ -20,63 +21,77 @@ Database: PostgreSQL / MySQL / Oracle
 -- 4. OR
 -- Always use parentheses when combining AND with OR to prevent logical bugs!
 
+
 -- =============================================================================
 -- 2. Basic WHERE Condition
 -- =============================================================================
 
--- Find all students registered in department 1 (Computer Science)
-SELECT student_id, first_name, last_name, department_id, gpa
+-- Find all students registered in program 1 (BSc Computer Science):
+SELECT student_id, registration_no, first_name, last_name, program_id, admission_year
 FROM students
-WHERE department_id = 1;
+WHERE program_id = 1;
+
 
 -- =============================================================================
 -- 3. Combining Conditions with AND
 -- =============================================================================
 
--- Find students in department 1 who also have a GPA >= 3.50
-SELECT student_id, first_name, last_name, department_id, gpa
-FROM students
+-- Find lecturers in department 1 who also earn more than 1,500,000 RWF per month:
+SELECT lecturer_id, first_name, last_name, academic_rank, monthly_salary, department_id
+FROM lecturers
 WHERE department_id = 1 
-  AND gpa >= 3.50;
+  AND monthly_salary >= 1500000.00;
+
 
 -- =============================================================================
 -- 4. Alternative Conditions with OR
 -- =============================================================================
 
--- Find students enrolled in either Computer Science (1) or Business (2)
-SELECT student_id, first_name, last_name, department_id
+-- Find students enrolled in either Computer Science (program 1) or Mathematics (program 2):
+SELECT student_id, registration_no, first_name, last_name, program_id
 FROM students
-WHERE department_id = 1 
-   OR department_id = 2;
+WHERE program_id = 1 
+   OR program_id = 2;
+
 
 -- =============================================================================
 -- 5. Operator Precedence: The Parentheses Trap
 -- =============================================================================
 
--- INTENT: Find active students in either department 1 OR department 2
+-- INTENT: Find ACTIVE students in either program 1 OR program 2
 -- INCORRECT (AND takes precedence over OR):
-SELECT student_id, first_name, department_id, status
+SELECT student_id, first_name, program_id, status
 FROM students
-WHERE department_id = 1 OR department_id = 2 AND status = 'Active';
--- This actually evaluates to: department_id = 1 OR (department_id = 2 AND status = 'Active')
+WHERE program_id = 1 OR program_id = 2 AND status = 'Active';
+-- This actually evaluates as: program_id = 1 OR (program_id = 2 AND status = 'Active')
+-- Result: 10 rows, including Alice (Graduated) and Fabrice (Suspended)!
 
--- CORRECT (Explicit parentheses):
-SELECT student_id, first_name, department_id, status
+-- CORRECT (Explicit parentheses enforce the intended grouping):
+SELECT student_id, first_name, program_id, status
 FROM students
-WHERE (department_id = 1 OR department_id = 2) 
+WHERE (program_id = 1 OR program_id = 2)
   AND status = 'Active';
+-- Result: 8 rows, all Active
+
 
 -- =============================================================================
 -- 6. Negation with NOT
 -- =============================================================================
 
--- Find all instructors who are NOT in department 1
-SELECT instructor_id, first_name, last_name, department_id, salary
-FROM instructors
+-- Find all lecturers who are NOT in department 1:
+SELECT lecturer_id, first_name, last_name, academic_rank, department_id
+FROM lecturers
 WHERE NOT (department_id = 1);
 
+-- Find courses that do not carry 3 credits:
+SELECT course_id, course_code, course_title, credits
+FROM courses
+WHERE NOT (credits = 3);
+
+
 -- =============================================================================
--- 7. Practice Questions
+-- 7. Practice Exercises
 -- =============================================================================
--- Exercise 1: Find all instructors earning more than $60,000 who are NOT Professors.
--- Exercise 2: Find all courses with 4 credits that belong to department 1 OR department 4.
+-- Exercise 1: Find all lecturers earning more than 1,000,000 RWF who are NOT 'Professor'.
+-- Exercise 2: Find all courses with 4 credits that belong to department 1 OR department 2.
+-- Exercise 3: Find all students who were admitted before 2024 and whose status is NOT 'Active'.

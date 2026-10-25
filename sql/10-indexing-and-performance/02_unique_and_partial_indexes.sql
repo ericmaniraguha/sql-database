@@ -1,74 +1,123 @@
 /*
 ================================================================================
-Topic: UNIQUE, Partial (Filtered), and Function-Based Indexes
-Objective: Enforce unique constraints via indexes, create storage-efficient 
-           partial indexes, and index expressions and function results.
-Database: PostgreSQL / MySQL / Oracle
+Topic: UNIQUE, Partial and Expression Indexes
+Objective: Enforce rules with unique indexes (including case-insensitive
+           uniqueness), index only the rows that matter, index expressions,
+           and write WHERE clauses that can use an index.
+Database: PostgreSQL (pgAdmin)
+          MySQL 8.0.13+: expression indexes yes, partial indexes NO
+          Oracle: function-based indexes yes, partial indexes NO
 ================================================================================
 */
 
 -- =============================================================================
 -- 1. Concept Overview
 -- =============================================================================
--- - UNIQUE Index: Guarantees no two rows have the same index key values while 
---   providing full search performance.
--- - Partial / Filtered Index: Indexes only a subset of table rows (specified by a 
---   WHERE clause), drastically saving disk space and memory cache.
--- - Function-Based Index: Indexes the computed result of an expression or function 
---   (e.g., LOWER(email)) so searches on that function utilize an index.
+-- - UNIQUE index     : an index that also refuses duplicate values.
+-- - Partial index    : indexes only the rows that match a WHERE condition.
+-- - Expression index : indexes the RESULT of an expression, e.g. LOWER(email).
+--
+-- A testing trick used in this file: on tiny tables PostgreSQL prefers a full
+-- scan even when an index exists.
+--     SET enable_seqscan = off;
+-- tells it to avoid full scans whenever it CAN. If the plan still says
+-- "Seq Scan", the index simply cannot be used for that WHERE clause.
+--     RESET enable_seqscan;
+-- switches the normal behaviour back on. (Experiments only, never production.)
+
 
 -- =============================================================================
 -- 2. UNIQUE Indexes
 -- =============================================================================
+-- Our UNIQUE constraints already created unique indexes, for example:
+SELECT indexname, indexdef
+FROM pg_indexes
+WHERE tablename = 'courses';            -- courses_pkey, courses_course_code_key
 
-CREATE UNIQUE INDEX idx_uq_instructor_email 
-ON instructors(email);
+-- A gap in our design: UNIQUE (email) is case-sensitive, so
+-- 'Aline.Uwase@uni.example' would be accepted as a "different" email.
+-- A unique EXPRESSION index closes the gap:
+CREATE UNIQUE INDEX IF NOT EXISTS ux_students_email_lower
+    ON students (LOWER(email));
 
--- Enforce uniqueness of course codes
-CREATE UNIQUE INDEX idx_uq_course_code 
-ON courses(course_code);
+-- Test (uncomment): same address, different capitals
+-- INSERT INTO students (registration_no, first_name, last_name, email, admission_year, program_id)
+-- VALUES ('2026CS099', 'Test', 'Student', 'Aline.Uwase@uni.example', 2026, 1);
+-- Expected: ERROR: duplicate key value violates unique constraint "ux_students_email_lower"
 
--- =============================================================================
--- 3. Partial (Filtered) Indexes (PostgreSQL / SQLite)
--- =============================================================================
--- Scenario: In an academic database with 100,000 students, only 2% are on 
--- 'Academic Warning'. Indexing the entire table wastes 98% of RAM.
--- A partial index indexes ONLY the warning rows:
-
--- PostgreSQL syntax:
-/*
-CREATE INDEX idx_students_active_warning 
-ON students(student_id, gpa)
-WHERE status = 'Academic Warning';
-
--- This query uses the small partial index:
-SELECT student_id, gpa 
-FROM students 
-WHERE status = 'Academic Warning' AND gpa < 2.00;
-*/
-
--- In MySQL 8.0+:
--- MySQL does not have partial indexes with WHERE, but supports functional indexes.
 
 -- =============================================================================
--- 4. Function-Based (Expression) Indexes
+-- 3. Partial Indexes (PostgreSQL)
 -- =============================================================================
--- Problem: If you execute WHERE LOWER(email) = 'user@example.com', a standard index 
--- on 'email' CANNOT be used because the function wraps the column.
--- Solution: Create an index on the expression itself!
+-- Most enrollments end up 'Completed'; the registrar's daily screens only look
+-- at the few 'Registered' ones. Index just those rows:
+CREATE INDEX IF NOT EXISTS ix_enrollments_registered
+    ON enrollments (offering_id)
+    WHERE status = 'Registered';
 
--- PostgreSQL / Oracle / MySQL 8.0+:
-CREATE INDEX idx_students_lower_email 
-ON students((LOWER(email)));
+-- Cash payments without a receipt number, which the bursar must follow up:
+CREATE INDEX IF NOT EXISTS ix_payments_missing_reference
+    ON payments (payment_date)
+    WHERE reference_no IS NULL;
 
--- This query now performs an instant Index Scan instead of a full table scan:
-SELECT student_id, first_name, last_name, email
-FROM students
-WHERE LOWER(email) = 'a.niyonsaba@student.ulk.ac.rw';
+SET enable_seqscan = off;
+
+-- The query repeats the index condition, so the partial index applies:
+EXPLAIN
+SELECT student_id FROM enrollments
+WHERE status = 'Registered' AND offering_id = 9;   -- uses ix_enrollments_registered
+
+RESET enable_seqscan;
+
+-- A partial index can also be UNIQUE, e.g. "at most one row per X among the
+-- rows that match the WHERE":
+--   CREATE UNIQUE INDEX ... ON table (x) WHERE status = 'Active';
+
 
 -- =============================================================================
--- 5. Practice Questions
+-- 4. Expression Indexes and "Index-Friendly" WHERE Clauses
 -- =============================================================================
--- Exercise 1: Create a function-based index on UPPER(last_name) in instructors.
--- Exercise 2: Why are partial indexes especially beneficial for soft-deleted tables 
---             where 95% of records have is_deleted = FALSE?
+-- An index on a column is only usable when the WHERE clause compares the
+-- column ITSELF. Wrapping the column in a function hides it from the index.
+CREATE INDEX IF NOT EXISTS ix_lecturers_hire_date ON lecturers (hire_date);
+
+SET enable_seqscan = off;
+
+-- NOT index-friendly: the function is applied to every row first
+EXPLAIN
+SELECT first_name FROM lecturers
+WHERE EXTRACT(YEAR FROM hire_date) = 2015;          -- still "Seq Scan"
+
+-- Index-friendly: the same question as a range on the bare column
+EXPLAIN
+SELECT first_name FROM lecturers
+WHERE hire_date >= '2015-01-01' AND hire_date < '2016-01-01';   -- "Index Scan"
+
+-- When you really must search on an expression, index the expression.
+-- The query must use EXACTLY the same expression as the index:
+EXPLAIN
+SELECT student_id FROM students
+WHERE LOWER(email) = 'aline.uwase@uni.example';     -- uses ux_students_email_lower
+
+RESET enable_seqscan;
+
+
+-- =============================================================================
+-- 5. Clean Up
+-- =============================================================================
+DROP INDEX IF EXISTS ux_students_email_lower;
+DROP INDEX IF EXISTS ix_enrollments_registered;
+DROP INDEX IF EXISTS ix_payments_missing_reference;
+DROP INDEX IF EXISTS ix_lecturers_hire_date;
+
+
+-- =============================================================================
+-- 6. Practice Exercises
+-- =============================================================================
+-- Exercise 1: Create an expression index on UPPER(last_name) for lecturers and
+--             write a query that can use it.
+-- Exercise 2: Rewrite WHERE EXTRACT(MONTH FROM payment_date) = 9
+--                   AND EXTRACT(YEAR FROM payment_date) = 2026
+--             so that an index on payment_date could be used.
+-- Exercise 3: Why is a partial index a good fit for a soft-delete design where
+--             95% of rows are 'Active' and queries only look at the rest?

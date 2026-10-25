@@ -41,7 +41,7 @@ SELECT
     is_nullable,
     column_default
 FROM information_schema.columns
-WHERE table_schema = DATABASE() -- In PostgreSQL replace DATABASE() with CURRENT_SCHEMA()
+WHERE table_schema = CURRENT_SCHEMA -- PostgreSQL / ANSI standard (in MySQL use DATABASE())
 ORDER BY table_name, ordinal_position;
 
 -- =============================================================================

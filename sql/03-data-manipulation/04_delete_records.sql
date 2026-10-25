@@ -1,78 +1,118 @@
 /*
 ================================================================================
 Topic: Deleting Records with DELETE
-Objective: Understand row removal, foreign key constraint enforcement during 
-           deletion, and contrast hard deletion with soft deletion.
-Database: PostgreSQL / MySQL / Oracle
+Objective: Remove rows safely, see how foreign keys protect related data,
+           delete in child -> parent order, and compare hard and soft deletion.
+Database: PostgreSQL (pgAdmin)
+          MySQL / Oracle: same DELETE syntax; RETURNING is PostgreSQL-only
 ================================================================================
 */
 
 -- =============================================================================
 -- 1. Concept Overview
 -- =============================================================================
--- The DELETE statement removes specific rows from a table based on a condition.
--- Like UPDATE, executing DELETE without a WHERE clause removes ALL rows in the table.
--- Referential integrity constraints prevent deleting parent rows if active child
--- records reference them (unless ON DELETE CASCADE is configured).
+--   DELETE FROM table_name
+--   WHERE condition;
+--
+-- - Without WHERE, DELETE removes EVERY row in the table.
+-- - A parent row cannot be deleted while child rows reference it through a
+--   FOREIGN KEY (the default RESTRICT behaviour from module 02).
+--
+-- Every section runs inside BEGIN ... ROLLBACK, so nothing is really lost.
+
 
 -- =============================================================================
--- 2. Deleting a Specific Record
+-- 2. Deleting One Specific Row
 -- =============================================================================
+-- Chantal's dropped ACC101 enrollment (enrollment 21) has no scores.
+BEGIN;
+    DELETE FROM enrollments
+    WHERE enrollment_id = 21
+    RETURNING enrollment_id, student_id, offering_id, status;   -- 1 row
+ROLLBACK;
 
--- Delete a specific enrollment record
-DELETE FROM enrollments
-WHERE enrollment_id = 11;
-
--- =============================================================================
--- 3. Conditional Multi-Row Deletions
--- =============================================================================
-
--- Delete all enrollments where status is 'Dropped'
-DELETE FROM enrollments
-WHERE status = 'Dropped';
-
--- Delete records using a subquery (delete honor roll students whose GPA dropped below 3.7)
-DELETE FROM honor_roll_students
-WHERE student_id IN (
-    SELECT student_id 
-    FROM students 
-    WHERE gpa < 3.70
-);
 
 -- =============================================================================
--- 4. Foreign Key Restraint Demonstration
+-- 3. Deleting Several Rows
 -- =============================================================================
--- The following statement will fail if student 1 has active enrollments and 
--- the foreign key is set to RESTRICT:
+-- Remove every enrollment that was dropped.
+BEGIN;
+    SELECT enrollment_id, student_id, offering_id      -- preview first: 2 rows
+    FROM enrollments
+    WHERE status = 'Dropped';
+
+    DELETE FROM enrollments
+    WHERE status = 'Dropped';                           -- "DELETE 2"
+ROLLBACK;
+
+-- Delete using a subquery: remove scholarships that nobody has received.
+BEGIN;
+    DELETE FROM scholarships
+    WHERE scholarship_id NOT IN (SELECT scholarship_id
+                                 FROM student_scholarships)
+    RETURNING scholarship_name;                         -- Sports Excellence Award
+ROLLBACK;
+
+
+-- =============================================================================
+-- 4. Foreign Keys Protect Related Data
+-- =============================================================================
+-- Aline (student 1) has enrollments and an invoice, so this is refused.
+-- Uncomment to see the error:
 -- DELETE FROM students WHERE student_id = 1;
--- Because fk_enrollments_student has ON DELETE CASCADE, child enrollments are
--- deleted automatically along with the student.
+-- Expected: ERROR: update or delete on table "students" violates foreign key
+--           constraint "enrollments_student_id_fkey" on table "enrollments"
+
+-- Alice (student 9, graduated) has no related rows, so she can be deleted.
+BEGIN;
+    DELETE FROM students
+    WHERE student_id = 9
+    RETURNING registration_no, first_name, last_name;
+ROLLBACK;
+
+-- To remove a student WITH related rows, delete the children first.
+-- Belinda (student 15): 1 invoice (13) -> 2 invoice items + 1 payment.
+BEGIN;
+    DELETE FROM payments      WHERE invoice_id = 13;     -- grandchildren first
+    DELETE FROM invoice_items WHERE invoice_id = 13;
+    DELETE FROM invoices      WHERE student_id = 15;     -- then the child
+    DELETE FROM students      WHERE student_id = 15;     -- the parent last
+ROLLBACK;
+
 
 -- =============================================================================
--- 5. Hard Delete vs Soft Delete Pattern
+-- 5. Hard Delete vs. Soft Delete
 -- =============================================================================
--- In enterprise systems, physically removing data (hard delete) is often avoided.
--- Instead, a 'soft delete' flag is updated so data can be audited or recovered.
+-- A HARD delete physically removes the row; its history (grades, payments)
+-- must go too, as Section 4 showed. Universities and banks rarely do this.
+--
+-- A SOFT delete keeps the row and marks it as no longer active. Our students
+-- table already supports this through its status column.
+BEGIN;
+    -- Emmanuel (student 12) leaves the university:
+    UPDATE students
+    SET status = 'Withdrawn'
+    WHERE student_id = 12;
 
--- Step 1: Add is_deleted flag
-ALTER TABLE students 
-ADD is_deleted BOOLEAN DEFAULT FALSE;
+    -- Day-to-day queries simply ignore withdrawn students...
+    SELECT registration_no, first_name, last_name
+    FROM students
+    WHERE status <> 'Withdrawn'
+    ORDER BY registration_no;
 
--- Step 2: Soft delete instead of DELETE FROM
-UPDATE students
-SET is_deleted = TRUE
-WHERE student_id = 8;
+    -- ...but his transcript and payments are still there for the records office.
+    SELECT course_code, final_percent, letter_grade
+    FROM final_grades
+    WHERE student_id = 12;
+ROLLBACK;
 
--- Step 3: Query only active, non-deleted records
-SELECT student_id, first_name, last_name 
-FROM students
-WHERE is_deleted = FALSE;
-
--- Clean up demonstration column
-ALTER TABLE students DROP COLUMN is_deleted;
 
 -- =============================================================================
--- 6. Practice Questions
+-- 6. Practice Exercises (use BEGIN ... ROLLBACK)
 -- =============================================================================
--- Exercise 1: Write a DELETE query to remove courses with 0 credits if any exist.
--- Exercise 2: Why is Soft Deletion preferred in banking and student grading systems?
+-- Exercise 1: Delete all invoice items with an amount of 0 (if any). How many
+--             rows are deleted?
+-- Exercise 2: CS401 has never been offered, yet DELETE FROM courses WHERE
+--             course_code = 'CS401' is refused. Which table still references it,
+--             and what would you have to delete first?
+-- Exercise 3: Why is soft deletion preferred for student grades and payments?

@@ -1,78 +1,123 @@
 /*
 ================================================================================
 Topic: Comparison Operators and BETWEEN Range Filtering
-Objective: Filter numeric, text, and temporal data using relational comparison 
-           operators and the inclusive BETWEEN operator.
-Database: PostgreSQL / MySQL / Oracle
+Objective: Filter numbers, text and dates with comparison operators and the
+           inclusive BETWEEN operator, and write safe date ranges.
+Database: PostgreSQL (pgAdmin)
+          MySQL / Oracle: identical syntax (Oracle needs DATE '2026-09-01'
+          for date literals)
 ================================================================================
 */
 
 -- =============================================================================
 -- 1. Concept Overview
 -- =============================================================================
--- Comparison operators compare two expressions:
---   =   Equal to
---   != or <>  Not equal to
---   >   Greater than
---   <   Less than
---   >=  Greater than or equal to
---   <=  Less than or equal to
+--   =          equal to
+--   <> or !=   not equal to (<> is the SQL standard)
+--   >   <      greater than / less than
+--   >=  <=     greater than or equal / less than or equal
 --
--- The BETWEEN operator tests whether a value falls within an INCLUSIVE range:
---   expression BETWEEN low AND high
---   is equivalent to:
---   expression >= low AND expression <= high
+-- BETWEEN tests an INCLUSIVE range; both ends are included:
+--   x BETWEEN low AND high      is the same as      x >= low AND x <= high
+
 
 -- =============================================================================
--- 2. Basic Comparison Operators
+-- 2. Comparison Operators on Numbers
 -- =============================================================================
 
--- Find courses with strictly more than 3 credits
-SELECT course_id, course_code, course_name, credits
+-- Courses worth more than 3 credits
+SELECT course_code, course_title, credits
 FROM courses
-WHERE credits > 3;
+WHERE credits > 3;                                      -- 4 rows: the CS courses
 
--- Find all instructors with salaries not equal to 50000
-SELECT instructor_id, first_name, last_name, salary
-FROM instructors
-WHERE salary <> 50000.00;
+-- Lecturers who do NOT earn exactly 1,300,000 RWF
+SELECT first_name, last_name, monthly_salary
+FROM lecturers
+WHERE monthly_salary <> 1300000.00;                     -- 7 of 8 lecturers
+
+-- Payments of 500,000 RWF or more
+SELECT payment_id, invoice_id, payment_date, amount
+FROM payments
+WHERE amount >= 500000
+ORDER BY amount DESC;
+
 
 -- =============================================================================
--- 3. Range Filtering with BETWEEN (Numbers)
+-- 3. Comparison Operators on Text
 -- =============================================================================
+-- Text compares alphabetically, character by character.
 
--- Find students with GPA between 3.40 and 3.90 (Inclusive: 3.40 and 3.90 are included)
-SELECT student_id, first_name, last_name, gpa
+-- Students whose last name comes before 'I' in the alphabet
+SELECT first_name, last_name
 FROM students
-WHERE gpa BETWEEN 3.40 AND 3.90;
+WHERE last_name < 'I'
+ORDER BY last_name;                                     -- Bizimana, Habimana, Hakizimana
 
--- Equivalent explicit syntax:
-SELECT student_id, first_name, last_name, gpa
-FROM students
-WHERE gpa >= 3.40 AND gpa <= 3.90;
+-- Text comparison is case-sensitive in PostgreSQL:
+SELECT course_code FROM courses WHERE course_code = 'cs101';   -- 0 rows
+SELECT course_code FROM courses WHERE course_code = 'CS101';   -- 1 row
 
--- Find instructors whose salary is NOT between 50000 and 70000
-SELECT instructor_id, first_name, last_name, salary
-FROM instructors
-WHERE salary NOT BETWEEN 50000.00 AND 70000.00;
 
 -- =============================================================================
--- 4. Date Range Comparisons
+-- 4. Range Filtering with BETWEEN
 -- =============================================================================
 
--- Find instructors hired between January 1, 2015 and December 31, 2018
-SELECT instructor_id, first_name, last_name, hire_date
-FROM instructors
+-- Course results in the B range (70 to 79.99 %)
+SELECT student_id, course_code, final_percent, letter_grade
+FROM final_grades
+WHERE final_percent BETWEEN 70 AND 79.99
+ORDER BY final_percent DESC;
+
+-- The same filter written with >= and <=
+SELECT student_id, course_code, final_percent, letter_grade
+FROM final_grades
+WHERE final_percent >= 70 AND final_percent <= 79.99
+ORDER BY final_percent DESC;
+
+-- NOT BETWEEN: salaries outside 1,000,000 - 2,000,000 RWF
+SELECT first_name, last_name, monthly_salary
+FROM lecturers
+WHERE monthly_salary NOT BETWEEN 1000000 AND 2000000
+ORDER BY monthly_salary;                                -- Ange, Joseph, Esther
+
+-- Careful: BETWEEN needs the SMALLER value first.
+SELECT course_code FROM courses WHERE credits BETWEEN 4 AND 3;  -- 0 rows!
+
+
+-- =============================================================================
+-- 5. Date Ranges
+-- =============================================================================
+-- Write dates as 'YYYY-MM-DD'; they compare in calendar order.
+
+-- Lecturers hired from 2015 to 2018 (inclusive)
+SELECT first_name, last_name, hire_date
+FROM lecturers
 WHERE hire_date BETWEEN '2015-01-01' AND '2018-12-31'
-ORDER BY hire_date;
+ORDER BY hire_date;                                     -- Claudine, Didier, Samuel
 
--- Find students born on or after the year 2003
-SELECT student_id, first_name, last_name, birth_date
+-- Students born on or after 1 January 2005
+SELECT first_name, last_name, date_of_birth
 FROM students
-WHERE birth_date >= '2003-01-01';
+WHERE date_of_birth >= '2005-01-01'
+ORDER BY date_of_birth;
+-- Kevin (date_of_birth NULL) is not listed: NULL is never >= anything (see file 04).
+
+-- Payments received in September 2026.
+-- Best practice for date ranges: ">= first day AND < first day of the NEXT period".
+-- It also works for TIMESTAMP columns, where BETWEEN '...-01' AND '...-30'
+-- would miss everything after midnight on the 30th.
+SELECT payment_id, payment_date, amount, payment_method
+FROM payments
+WHERE payment_date >= '2026-09-01'
+  AND payment_date <  '2026-10-01'
+ORDER BY payment_date;
+
 
 -- =============================================================================
--- 5. Practice Questions
+-- 6. Practice Exercises
 -- =============================================================================
--- Exercise 1: Find all departments with a budget between $700,000 and $1,000,000.
--- Exercise 2: Find all enrollments with numeric_grade between 80.00 and 89.99.
+-- Exercise 1: Find payments with an amount between 100,000 and 400,000 RWF.
+-- Exercise 2: Find assessments due in November 2026 (use the >= / < pattern).
+-- Exercise 3: Find students admitted from 2023 to 2025. How many are there?
+-- Exercise 4: Find course results (final_grades) that are NOT between 50 and 100.
+--             Which letter grade do they all have?

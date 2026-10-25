@@ -1,71 +1,132 @@
 /*
 ================================================================================
-Topic: Mathematical and Numeric Functions
-Objective: Perform calculations, rounding, truncations, and mathematical operations 
-           on numeric columns.
-Database: PostgreSQL / MySQL / Oracle
+Topic: Numeric Functions and Arithmetic
+Objective: Calculate with numbers: arithmetic, the integer-division trap,
+           rounding (ROUND, TRUNC, CEIL, FLOOR), ABS, MOD and POWER.
+Database: PostgreSQL (pgAdmin)
+          MySQL: TRUNCATE(x, d) instead of TRUNC; 7 / 2 = 3.5000 (no trap)
+          Oracle: identical function names; 7 / 2 = 3.5
 ================================================================================
 */
 
 -- =============================================================================
 -- 1. Concept Overview
 -- =============================================================================
--- SQL provides standard arithmetic and mathematical scalar functions to perform
--- precision rounding, absolute value calculation, modular division, and powers.
+-- Arithmetic operators:  +  -  *  /  and  %  (remainder)
+-- Numeric functions return a calculated value; the stored data is unchanged.
+
 
 -- =============================================================================
--- 2. Precision Rounding and Truncation: ROUND, TRUNC / TRUNCATE
+-- 2. Arithmetic on Columns
+-- =============================================================================
+SELECT
+    first_name,
+    last_name,
+    monthly_salary,
+    monthly_salary * 12   AS annual_salary,
+    monthly_salary / 22   AS daily_rate             -- about 22 working days a month
+FROM lecturers
+ORDER BY monthly_salary DESC;
+
+-- Net pay and the tax rate, from the payroll table
+SELECT
+    lecturer_id,
+    pay_month,
+    gross_amount - tax_amount - other_deductions AS net_pay,
+    tax_amount / gross_amount * 100              AS tax_rate_percent   -- 30.0000...
+FROM salary_payments
+WHERE pay_month = '2026-09';
+
+
+-- =============================================================================
+-- 3. The Integer Division Trap
+-- =============================================================================
+-- In PostgreSQL, INTEGER / INTEGER = INTEGER: the decimals are thrown away.
+SELECT
+    7 / 2              AS integer_division,     -- 3   (!)
+    7 / 2.0            AS decimal_division,     -- 3.5
+    7.0 / 2            AS also_decimal,         -- 3.5
+    CAST(7 AS DECIMAL) / 2 AS with_cast;        -- 3.5
+
+-- Real example: credits are INTEGER. "Average credits per course" goes wrong:
+SELECT
+    SUM(credits) / COUNT(*)       AS wrong_average,   -- 3   (31 / 9 truncated)
+    SUM(credits) * 1.0 / COUNT(*) AS right_average    -- 3.44...
+FROM courses;
+-- (SUM and COUNT are aggregates: module 06.)
+-- This is why the final_grades view writes "sc.score * 1.0 / a.max_score".
+
+
+-- =============================================================================
+-- 4. Rounding: ROUND, TRUNC, CEIL, FLOOR
+-- =============================================================================
+SELECT
+    course_code,
+    final_percent,
+    ROUND(final_percent)    AS rounded,          -- nearest whole number
+    ROUND(final_percent, 1) AS one_decimal,
+    TRUNC(final_percent)    AS truncated,        -- just cut the decimals off
+    CEIL(final_percent)     AS ceiling,          -- always UP
+    FLOOR(final_percent)    AS floor_value       -- always DOWN
+FROM final_grades
+WHERE student_id IN (1, 6)                       -- Aline and Yves
+ORDER BY student_id, course_code;
+
+-- Rounding money: monthly salary divided into 4 weekly payments
+SELECT
+    first_name,
+    monthly_salary / 4           AS exact_weekly,
+    ROUND(monthly_salary / 4, 2) AS weekly_to_the_franc
+FROM lecturers
+WHERE lecturer_id = 7;                           -- 1,750,000 / 4 = 437,500.00
+
+
+-- =============================================================================
+-- 5. ABS, SIGN, MOD and POWER
 -- =============================================================================
 
-SELECT 
+-- ABS: how far is each result from the pass mark of 50, ignoring direction?
+-- SIGN: +1 above the pass mark, -1 below it, 0 exactly on it.
+SELECT
     student_id,
-    gpa,
-    ROUND(gpa, 1) AS gpa_rounded_one_dec,
-    ROUND(gpa, 0) AS gpa_rounded_integer
-FROM students;
+    course_code,
+    final_percent,
+    ABS(final_percent - 50)  AS distance_from_pass_mark,
+    SIGN(final_percent - 50) AS above_or_below
+FROM final_grades
+ORDER BY distance_from_pass_mark
+LIMIT 5;
 
--- In MySQL: TRUNCATE(val, decimals)
--- In PostgreSQL / Oracle: TRUNC(val, decimals)
-SELECT 
-    salary,
-    ROUND(salary / 12, 2) AS rounded_monthly,
-    FLOOR(salary / 12)    AS floor_monthly,    -- Round down to nearest whole number
-    CEIL(salary / 12)     AS ceiling_monthly   -- Round up to nearest whole number
-FROM instructors;
-
--- =============================================================================
--- 3. Absolute Values and Signs: ABS, SIGN
--- =============================================================================
-
-SELECT 
-    ABS(-150.75) AS absolute_value,
-    SIGN(25)     AS positive_sign,   -- Returns 1
-    SIGN(0)      AS zero_sign,       -- Returns 0
-    SIGN(-42)    AS negative_sign;   -- Returns -1
-
--- =============================================================================
--- 4. Modulo (Remainder) and Exponents: MOD, POWER / SQRT
--- =============================================================================
-
--- Modulo returns remainder after division (useful for even/odd checking)
-SELECT 
+-- MOD (remainder): split students into 2 lab groups by student_id
+SELECT
     student_id,
-    MOD(student_id, 2) AS remainder,
-    CASE 
-        WHEN MOD(student_id, 2) = 0 THEN 'Even Cohort'
-        ELSE 'Odd Cohort'
-    END AS cohort_group
-FROM students;
+    first_name,
+    MOD(student_id, 2) + 1 AS lab_group          -- 1 or 2
+FROM students
+ORDER BY lab_group, student_id;
 
--- Power and Square Root
-SELECT 
-    POWER(3, 2) AS three_squared,
-    SQRT(144)   AS square_root_144;
+-- POWER: tuition projection with a 5% increase every year for 3 years
+SELECT
+    program_id,
+    fee_type,
+    amount                             AS tuition_now,
+    ROUND(amount * POWER(1.05, 3), 0)  AS tuition_in_3_years
+FROM fee_structures
+WHERE term_id = 1
+  AND fee_type = 'Tuition'
+ORDER BY program_id;
+
+-- SQRT for completeness
+SELECT SQRT(144) AS square_root, POWER(2, 10) AS two_to_the_10th;
+
 
 -- =============================================================================
--- 5. Practice Questions
+-- 6. Practice Exercises
 -- =============================================================================
--- Exercise 1: Calculate the difference between each student's GPA and a perfect 4.00,
---             using ROUND to display 2 decimal places.
--- Exercise 2: Calculate the monthly income of instructors and show both FLOOR and CEIL 
---             values alongside the raw value.
+-- Exercise 1: For each student in student_gpa, show how far their GPA is from
+--             a perfect 4.00, rounded to 2 decimals.
+-- Exercise 2: Show each lecturer's monthly_salary divided by 3, with ROUND,
+--             CEIL and FLOOR side by side. Which one never pays too little?
+-- Exercise 3: What do SELECT 10 / 4 and SELECT 10 / 4.0 return? Explain why.
+-- Exercise 4: Show each scholarship award as a percentage of 650,000 RWF,
+--             rounded to 1 decimal.
