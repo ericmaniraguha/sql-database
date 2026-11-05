@@ -2,7 +2,7 @@
 ================================================================================
 Topic: Numeric Functions and Arithmetic
 Objective: Calculate with numbers: arithmetic, the integer-division trap,
-           rounding (ROUND, TRUNC, CEIL, FLOOR), ABS, MOD and POWER.
+           rounding (ROUND, TRUNC, CEIL, FLOOR), ABS, MOD, POWER and SQRT.
 Database: PostgreSQL (pgAdmin)
           MySQL: TRUNCATE(x, d) instead of TRUNC; 7 / 2 = 3.5000 (no trap)
           Oracle: identical function names; 7 / 2 = 3.5
@@ -14,6 +14,41 @@ Database: PostgreSQL (pgAdmin)
 -- =============================================================================
 -- Arithmetic operators:  +  -  *  /  and  %  (remainder)
 -- Numeric functions return a calculated value; the stored data is unchanged.
+--
+-- Quick reference:
+--
+-- | Function  | Purpose                                | Example                        | Result     |
+-- |-----------|----------------------------------------|--------------------------------|------------|
+-- | ROUND()   | Rounds a number                        | ROUND(monthly_salary / 22, 2)  | 81818.18   |
+-- | CEIL()    | Rounds up to the next integer          | CEIL(450.25)                   | 451        |
+-- | FLOOR()   | Rounds down to the previous integer    | FLOOR(450.85)                  | 450        |
+-- | ABS()     | Returns the absolute value             | ABS(-500)                      | 500        |
+-- | MOD()     | Returns the remainder of a division    | MOD(10, 3)                     | 1          |
+-- | POWER()   | Raises a number to a power             | POWER(2, 3)                    | 8          |
+-- | SQRT()    | Calculates the square root             | SQRT(64)                       | 8          |
+--
+-- (The ROUND result is for Claudine Mukamana: 1,800,000 / 22 working days.)
+-- Other databases: MySQL and Oracle use the same names. MySQL also accepts
+-- CEILING() and POW(); SQL Server only has CEILING().
+
+-- The seven functions at a glance, on fixed numbers
+SELECT
+    CEIL(450.25)  AS ceil_result,     -- 451
+    FLOOR(450.85) AS floor_result,    -- 450
+    ABS(-500)     AS abs_result,      -- 500
+    MOD(10, 3)    AS mod_result,      -- 1
+    POWER(2, 3)   AS power_result,    -- 8
+    SQRT(64)      AS sqrt_result;     -- 8
+
+-- ... and ROUND on real salaries: daily rate over 22 working days
+SELECT
+    first_name,
+    last_name,
+    monthly_salary,
+    monthly_salary / 22           AS daily_rate_exact,
+    ROUND(monthly_salary / 22, 2) AS daily_rate
+FROM lecturers
+ORDER BY monthly_salary DESC;                             -- 8 rows
 
 
 -- =============================================================================

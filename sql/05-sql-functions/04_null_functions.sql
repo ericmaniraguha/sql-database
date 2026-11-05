@@ -18,6 +18,34 @@ Database: PostgreSQL (pgAdmin)
 --
 -- Both are ANSI standard, so prefer them to IFNULL / NVL / ISNULL: the same
 -- query then runs on every database.
+--
+-- Quick reference (examples use the lecturers table):
+--
+-- | Function   | Purpose                               | Example                         |
+-- |------------|---------------------------------------|---------------------------------|
+-- | COALESCE() | Returns the first non-NULL value      | COALESCE(phone, 'No phone')     |
+-- | NULLIF()   | Returns NULL if two values are equal  | NULLIF(phone, '')               |
+--
+-- Typical uses:
+--   COALESCE(phone, 'No phone')    show a default instead of an empty cell
+--   COALESCE(SUM(amount), 0)       treat "no rows" as zero in totals
+--   total / NULLIF(count, 0)       avoid "division by zero": dividing by NULL
+--                                  gives NULL instead of an error
+--   NULLIF(phone, '')              turn empty text into a real NULL
+--
+-- Why not COALESCE(monthly_salary, 0)? It is valid SQL, but monthly_salary is
+-- NOT NULL in our schema, so it would never change anything. Use these
+-- functions on columns that can really be NULL (or 0).
+
+-- Both at a glance. Samuel and Josiane have no phone number.
+SELECT
+    first_name,
+    last_name,
+    phone,
+    COALESCE(phone, 'No phone') AS phone_or_default,
+    NULLIF(phone, '')           AS empty_text_as_null
+FROM lecturers
+ORDER BY last_name;                                       -- 8 rows
 
 
 -- =============================================================================

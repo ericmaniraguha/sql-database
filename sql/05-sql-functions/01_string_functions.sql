@@ -4,7 +4,7 @@ Topic: String (Text) Functions
 Objective: Change case, measure, join, cut, search, clean and pad text with
            standard SQL string functions.
 Database: PostgreSQL (pgAdmin)
-          MySQL: no || for text (use CONCAT); LOCATE / INSTR instead of POSITION
+          MySQL: no || for text (use CONCAT); LENGTH counts bytes (CHAR_LENGTH)
           Oracle: SUBSTR / INSTR; no LEFT / RIGHT (use SUBSTR)
 ================================================================================
 */
@@ -15,6 +15,57 @@ Database: PostgreSQL (pgAdmin)
 -- A string function takes text in and returns new text (or a number, such as
 -- a length). The stored data is NOT changed: functions only change what the
 -- query shows. To change stored data, use them inside an UPDATE.
+--
+-- Quick reference (examples use the columns of the lecturers table):
+--
+-- | Function    | Purpose                             | Example                             |
+-- |-------------|-------------------------------------|-------------------------------------|
+-- | TRIM()      | Removes spaces from both ends       | TRIM(last_name)                     |
+-- | LTRIM()     | Removes leading spaces              | LTRIM(last_name)                    |
+-- | RTRIM()     | Removes trailing spaces             | RTRIM(last_name)                    |
+-- | UPPER()     | Converts text to uppercase          | UPPER(last_name)                    |
+-- | LOWER()     | Converts text to lowercase          | LOWER(last_name)                    |
+-- | LENGTH()    | Returns number of characters        | LENGTH(last_name)                   |
+-- | SUBSTRING() | Extracts part of a string           | SUBSTRING(last_name, 1, 3)          |
+-- | REPLACE()   | Replaces text within a string       | REPLACE(phone, '+250', '0')         |
+-- | CONCAT()    | Combines strings                    | CONCAT(first_name, ' ', last_name)  |
+-- | POSITION()  | Finds the position of text          | POSITION('a' IN last_name)          |
+-- | LEFT()      | Extracts characters from the left   | LEFT(last_name, 3)                  |
+-- | RIGHT()     | Extracts characters from the right  | RIGHT(last_name, 3)                 |
+--
+-- Other databases:
+--   MySQL : all twelve work, but LENGTH() counts BYTES; use CHAR_LENGTH() to
+--           count characters in names with accents (e.g. 'Université').
+--   Oracle: SUBSTR() instead of SUBSTRING(), INSTR() instead of POSITION(),
+--           no LEFT() / RIGHT() (use SUBSTR), and CONCAT() takes only two
+--           arguments (use || to join more).
+
+-- The twelve functions at a glance, on every lecturer.
+-- Cleaning: the names are padded with spaces first, so you can SEE what each
+-- TRIM removes (the [ ] brackets show where the text starts and ends).
+SELECT
+    '[' ||       '  ' || last_name || '  '   || ']' AS padded,
+    '[' || TRIM ('  ' || last_name || '  ')  || ']' AS trim_both,
+    '[' || LTRIM('  ' || last_name || '  ')  || ']' AS trim_left,
+    '[' || RTRIM('  ' || last_name || '  ')  || ']' AS trim_right
+FROM lecturers
+ORDER BY last_name;
+
+-- Changing, measuring, cutting, searching and joining
+SELECT
+    last_name,
+    UPPER(last_name)                   AS upper_name,
+    LOWER(last_name)                   AS lower_name,
+    LENGTH(last_name)                  AS characters,
+    SUBSTRING(last_name, 1, 3)         AS first_three,
+    LEFT(last_name, 3)                 AS left_3,
+    RIGHT(last_name, 3)                AS right_3,
+    POSITION('a' IN last_name)         AS first_a_at,     -- 0 = not found
+    CONCAT(first_name, ' ', last_name) AS full_name,
+    REPLACE(phone, '+250', '0')        AS local_phone     -- NULL phone stays NULL
+FROM lecturers
+ORDER BY last_name;                                       -- 8 rows
+-- The sections below look at each function more closely.
 
 
 -- =============================================================================

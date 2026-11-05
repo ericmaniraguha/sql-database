@@ -18,6 +18,41 @@ Database: PostgreSQL (pgAdmin)
 -- Results that use CURRENT_DATE change every day. To get the same answers as
 -- the comments in this file, most queries use a fixed reference date:
 -- DATE '2026-09-07', the first day of the current term.
+--
+-- Quick reference (examples use the lecturers table):
+--
+-- | Function          | Purpose                            | Example                            |
+-- |-------------------|------------------------------------|------------------------------------|
+-- | CURRENT_DATE      | Returns the current date           | CURRENT_DATE                       |
+-- | CURRENT_TIMESTAMP | Returns the current date and time  | CURRENT_TIMESTAMP                  |
+-- | AGE()             | Calculates the interval between    | AGE(CURRENT_DATE, hire_date)       |
+-- |                   | two dates                          |                                    |
+-- | EXTRACT()         | Extracts a date component          | EXTRACT(YEAR FROM hire_date)       |
+-- | DATE_PART()       | Extracts a date component          | DATE_PART('month', hire_date)      |
+-- | TO_CHAR()         | Formats dates or numbers as text   | TO_CHAR(hire_date, 'DD-Mon-YYYY')  |
+--
+-- EXTRACT and DATE_PART do the same job: EXTRACT is the SQL standard,
+-- DATE_PART is PostgreSQL's own spelling.
+-- Other databases:
+--   MySQL : NOW() / CURDATE(); no AGE (use TIMESTAMPDIFF); no DATE_PART (use
+--           YEAR(), MONTH(), DAY()); DATE_FORMAT() instead of TO_CHAR().
+--   Oracle: SYSDATE / CURRENT_DATE; no AGE (use MONTHS_BETWEEN); no DATE_PART
+--           (use EXTRACT); TO_CHAR() works as in PostgreSQL.
+
+-- The six at a glance, on every lecturer.
+-- CURRENT_DATE and AGE() give a different answer each day you run this.
+-- The example values in the comments are Claudine Mukamana's (hired 2015-02-01).
+SELECT
+    CURRENT_DATE                       AS today,
+    CURRENT_TIMESTAMP                  AS right_now,
+    first_name,
+    hire_date,
+    AGE(CURRENT_DATE, hire_date)       AS time_since_hired,   -- e.g. 11 years 9 mons 1 day
+    EXTRACT(YEAR FROM hire_date)       AS hire_year,          -- 2015
+    DATE_PART('month', hire_date)      AS hire_month,         -- 2
+    TO_CHAR(hire_date, 'DD-Mon-YYYY')  AS printed             -- 01-Feb-2015
+FROM lecturers
+ORDER BY hire_date;                                           -- 8 rows
 
 
 -- =============================================================================

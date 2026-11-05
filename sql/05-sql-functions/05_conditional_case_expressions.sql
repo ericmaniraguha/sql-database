@@ -2,7 +2,8 @@
 ================================================================================
 Topic: Conditional Logic with CASE Expressions
 Objective: Write IF-THEN-ELSE logic inside SQL with searched and simple CASE,
-           and use CASE in SELECT, ORDER BY, aggregates and UPDATE.
+           use CASE in SELECT, ORDER BY, aggregates and UPDATE, and pick
+           the largest or smallest of several values with GREATEST / LEAST.
 Database: PostgreSQL (pgAdmin)
           MySQL / Oracle: identical CASE syntax
 ================================================================================
@@ -27,6 +28,40 @@ Database: PostgreSQL (pgAdmin)
 -- - The FIRST true WHEN wins; later WHENs are not checked. Order matters!
 -- - Without ELSE, a row that matches no WHEN gets NULL.
 -- - CASE is an expression: use it wherever a value is allowed.
+--
+-- Quick reference:
+--
+-- | Function / Expression | Purpose                     | Example                                    |
+-- |-----------------------|-----------------------------|--------------------------------------------|
+-- | CASE                  | Applies conditional logic   | CASE WHEN monthly_salary > 1500000         |
+-- |                       |                             |      THEN 'High' ELSE 'Low' END            |
+-- | GREATEST()            | Returns the greatest value  | GREATEST(100, 200, 300)   -> 300           |
+-- | LEAST()               | Returns the smallest value  | LEAST(100, 200, 300)      -> 100           |
+--
+-- GREATEST / LEAST compare values ACROSS COLUMNS in one row; MAX / MIN
+-- (module 06) compare values DOWN one column across many rows.
+-- NULL warning: PostgreSQL ignores NULL arguments (GREATEST(100, NULL) = 100),
+-- but MySQL and Oracle return NULL if ANY argument is NULL.
+-- GREATEST and LEAST are not in the SQL standard, but PostgreSQL, MySQL,
+-- Oracle and SQL Server 2022+ all have them.
+
+-- The three at a glance, on fixed numbers
+SELECT
+    GREATEST(100, 200, 300) AS greatest_value,    -- 300
+    LEAST(100, 200, 300)    AS least_value,       -- 100
+    GREATEST(100, NULL)     AS greatest_with_null; -- 100 in PostgreSQL
+
+-- ... and on real salaries
+SELECT
+    first_name,
+    last_name,
+    monthly_salary,
+    CASE WHEN monthly_salary > 1500000 THEN 'High' ELSE 'Low' END AS salary_band,
+    LEAST(monthly_salary, 2000000.00)    AS bonus_base_capped,   -- at most 2,000,000
+    GREATEST(monthly_salary, 1000000.00) AS raised_to_minimum    -- at least 1,000,000
+    -- (writing .00 keeps every result at 2 decimals, like the salary column)
+FROM lecturers
+ORDER BY monthly_salary DESC;                                 -- 4 High, 4 Low
 
 
 -- =============================================================================
